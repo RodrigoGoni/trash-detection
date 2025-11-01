@@ -205,3 +205,45 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Data (DL Project)
+data/raw/*
+data/processed/*
+data/interim/*
+data/external/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/interim/.gitkeep
+!data/external/.gitkeep
+
+# Models
+models/checkpoints/*
+models/production/*
+!models/checkpoints/.gitkeep
+!models/production/.gitkeep
+*.pth
+*.pt
+*.h5
+*.pb
+*.onnx
+*.weights
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# DVC
+.dvc/cache
+.dvc/tmp
+
+# Experiments
+experiments/*
+!experiments/.gitkeep
+
+# Tensorboard
+runs/
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

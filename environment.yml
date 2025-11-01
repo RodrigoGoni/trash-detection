@@ -1,0 +1,12 @@
+name: trash-detection
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip>=23.0
+  - cudatoolkit=11.8
+  - cudnn=8.9.0
+  - pip:
+    - -r requirements.txt

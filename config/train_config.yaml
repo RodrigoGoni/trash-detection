@@ -1,0 +1,78 @@
+# Model Training Configuration
+
+# Experiment settings
+experiment:
+  name: "trash_detection_baseline"
+  tags:
+    - "baseline"
+    - "resnet50"
+  description: "Baseline model for trash detection"
+
+# Data settings
+data:
+  data_dir: "./data/processed"
+  train_split: "train"
+  val_split: "val"
+  test_split: "test"
+  batch_size: 32
+  num_workers: 4
+  image_size: 224
+
+# Model settings
+model:
+  name: "TrashClassifier"
+  backbone: "resnet50"
+  pretrained: true
+  num_classes: 10
+  dropout: 0.5
+
+# Training settings
+training:
+  num_epochs: 100
+  device: "cuda"
+  
+  # Optimizer
+  optimizer:
+    type: "adam"
+    lr: 0.001
+    weight_decay: 0.0001
+  
+  # Scheduler
+  scheduler:
+    type: "reduce_on_plateau"
+    params:
+      mode: "min"
+      factor: 0.1
+      patience: 5
+      verbose: true
+  
+  # Loss function
+  criterion:
+    type: "cross_entropy"
+  
+  # Early stopping
+  patience: 10
+  
+  # Checkpointing
+  save_dir: "./models/checkpoints"
+  save_frequency: 10
+
+# MLflow settings
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "trash-detection"
+  run_name: null  # Auto-generated if null
+  artifact_location: "./mlruns"
+
+# Weights & Biases settings (optional)
+wandb:
+  enabled: false
+  project: "trash-detection"
+  entity: null
+  tags:
+    - "experiment"
+
+# DVC settings
+dvc:
+  remote: "myremote"
+  data_version: "v1"

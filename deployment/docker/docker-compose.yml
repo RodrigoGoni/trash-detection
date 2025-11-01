@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # Trash Detection API
+  api:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../models:/app/models
+      - ../../data:/app/data
+    environment:
+      - MODEL_PATH=/app/models/production/best_model.pth
+      - DEVICE=cpu
+    restart: unless-stopped
+    networks:
+      - trash-detection-network
+
+  # MLflow Tracking Server
+  mlflow:
+    image: python:3.10-slim
+    command: >
+      bash -c "pip install mlflow && 
+      mlflow server 
+      --backend-store-uri sqlite:///mlflow.db 
+      --default-artifact-root /mlflow/artifacts 
+      --host 0.0.0.0 
+      --port 5000"
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../../mlruns:/mlflow/artifacts
+      - mlflow-db:/mlflow
+    restart: unless-stopped
+    networks:
+      - trash-detection-network
+
+  # Prometheus (Monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+    networks:
+      - trash-detection-network
+
+  # Grafana (Visualization)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    restart: unless-stopped
+    networks:
+      - trash-detection-network
+
+volumes:
+  mlflow-db:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  trash-detection-network:
+    driver: bridge
