@@ -1,0 +1,231 @@
+================================================================================
+ESTADISTICAS COMPLETAS DEL DATASET TACO
+================================================================================
+Fecha de generacion: 2025-11-01 13:02:37
+
+1. ESTADISTICAS GENERALES
+--------------------------------------------------------------------------------
+Total de imagenes: 1500
+Total de anotaciones: 4784
+Total de categorias: 60
+Promedio de anotaciones por imagen: 3.19
+
+2. DIMENSIONES DE IMAGENES
+--------------------------------------------------------------------------------
+Ancho minimo: 842 px
+Ancho maximo: 6000 px
+Ancho promedio: 2824.88 px
+Ancho mediana: 2448.00 px
+Alto minimo: 474 px
+Alto maximo: 5312 px
+Alto promedio: 3222.83 px
+Alto mediana: 3264.00 px
+
+3. FORMATOS DE IMAGENES
+--------------------------------------------------------------------------------
+.jpg: 833 (55.53%)
+.JPG: 667 (44.47%)
+
+4. SUPERCATEGORIAS
+--------------------------------------------------------------------------------
+Total de supercategorias: 28
+Carton: 7 categorias
+Plastic bag & wrapper: 7 categorias
+Cup: 5 categorias
+Plastic container: 5 categorias
+Paper: 4 categorias
+Bottle: 3 categorias
+Can: 3 categorias
+Blister pack: 2 categorias
+Bottle cap: 2 categorias
+Lid: 2 categorias
+Paper bag: 2 categorias
+Straw: 2 categorias
+Aluminium foil: 1 categorias
+Battery: 1 categorias
+Broken glass: 1 categorias
+Food waste: 1 categorias
+Glass jar: 1 categorias
+Other plastic: 1 categorias
+Plastic glooves: 1 categorias
+Plastic utensils: 1 categorias
+Pop tab: 1 categorias
+Rope & strings: 1 categorias
+Scrap metal: 1 categorias
+Shoe: 1 categorias
+Squeezable tube: 1 categorias
+Styrofoam piece: 1 categorias
+Unlabeled litter: 1 categorias
+Cigarette: 1 categorias
+
+5. CATEGORIAS COMPLETAS
+--------------------------------------------------------------------------------
+ID: 0 - Aluminium foil (Supercategoria: Aluminium foil)
+ID: 1 - Battery (Supercategoria: Battery)
+ID: 2 - Aluminium blister pack (Supercategoria: Blister pack)
+ID: 3 - Carded blister pack (Supercategoria: Blister pack)
+ID: 4 - Other plastic bottle (Supercategoria: Bottle)
+ID: 5 - Clear plastic bottle (Supercategoria: Bottle)
+ID: 6 - Glass bottle (Supercategoria: Bottle)
+ID: 7 - Plastic bottle cap (Supercategoria: Bottle cap)
+ID: 8 - Metal bottle cap (Supercategoria: Bottle cap)
+ID: 9 - Broken glass (Supercategoria: Broken glass)
+ID: 10 - Food Can (Supercategoria: Can)
+ID: 11 - Aerosol (Supercategoria: Can)
+ID: 12 - Drink can (Supercategoria: Can)
+ID: 13 - Toilet tube (Supercategoria: Carton)
+ID: 14 - Other carton (Supercategoria: Carton)
+ID: 15 - Egg carton (Supercategoria: Carton)
+ID: 16 - Drink carton (Supercategoria: Carton)
+ID: 17 - Corrugated carton (Supercategoria: Carton)
+ID: 18 - Meal carton (Supercategoria: Carton)
+ID: 19 - Pizza box (Supercategoria: Carton)
+ID: 20 - Paper cup (Supercategoria: Cup)
+ID: 21 - Disposable plastic cup (Supercategoria: Cup)
+ID: 22 - Foam cup (Supercategoria: Cup)
+ID: 23 - Glass cup (Supercategoria: Cup)
+ID: 24 - Other plastic cup (Supercategoria: Cup)
+ID: 25 - Food waste (Supercategoria: Food waste)
+ID: 26 - Glass jar (Supercategoria: Glass jar)
+ID: 27 - Plastic lid (Supercategoria: Lid)
+ID: 28 - Metal lid (Supercategoria: Lid)
+ID: 29 - Other plastic (Supercategoria: Other plastic)
+ID: 30 - Magazine paper (Supercategoria: Paper)
+ID: 31 - Tissues (Supercategoria: Paper)
+ID: 32 - Wrapping paper (Supercategoria: Paper)
+ID: 33 - Normal paper (Supercategoria: Paper)
+ID: 34 - Paper bag (Supercategoria: Paper bag)
+ID: 35 - Plastified paper bag (Supercategoria: Paper bag)
+ID: 36 - Plastic film (Supercategoria: Plastic bag & wrapper)
+ID: 37 - Six pack rings (Supercategoria: Plastic bag & wrapper)
+ID: 38 - Garbage bag (Supercategoria: Plastic bag & wrapper)
+ID: 39 - Other plastic wrapper (Supercategoria: Plastic bag & wrapper)
+ID: 40 - Single-use carrier bag (Supercategoria: Plastic bag & wrapper)
+ID: 41 - Polypropylene bag (Supercategoria: Plastic bag & wrapper)
+ID: 42 - Crisp packet (Supercategoria: Plastic bag & wrapper)
+ID: 43 - Spread tub (Supercategoria: Plastic container)
+ID: 44 - Tupperware (Supercategoria: Plastic container)
+ID: 45 - Disposable food container (Supercategoria: Plastic container)
+ID: 46 - Foam food container (Supercategoria: Plastic container)
+ID: 47 - Other plastic container (Supercategoria: Plastic container)
+ID: 48 - Plastic glooves (Supercategoria: Plastic glooves)
+ID: 49 - Plastic utensils (Supercategoria: Plastic utensils)
+ID: 50 - Pop tab (Supercategoria: Pop tab)
+ID: 51 - Rope & strings (Supercategoria: Rope & strings)
+ID: 52 - Scrap metal (Supercategoria: Scrap metal)
+ID: 53 - Shoe (Supercategoria: Shoe)
+ID: 54 - Squeezable tube (Supercategoria: Squeezable tube)
+ID: 55 - Plastic straw (Supercategoria: Straw)
+ID: 56 - Paper straw (Supercategoria: Straw)
+ID: 57 - Styrofoam piece (Supercategoria: Styrofoam piece)
+ID: 58 - Unlabeled litter (Supercategoria: Unlabeled litter)
+ID: 59 - Cigarette (Supercategoria: Cigarette)
+
+6. DISTRIBUCION DE CLASES
+--------------------------------------------------------------------------------
+Total de clases con anotaciones: 59
+
+Top 20 clases mas frecuentes:
+Cigarette: 667 anotaciones (13.94%)
+Unlabeled litter: 517 anotaciones (10.81%)
+Plastic film: 451 anotaciones (9.43%)
+Clear plastic bottle: 285 anotaciones (5.96%)
+Other plastic: 273 anotaciones (5.71%)
+Other plastic wrapper: 260 anotaciones (5.43%)
+Drink can: 229 anotaciones (4.79%)
+Plastic bottle cap: 209 anotaciones (4.37%)
+Plastic straw: 157 anotaciones (3.28%)
+Broken glass: 138 anotaciones (2.88%)
+Styrofoam piece: 112 anotaciones (2.34%)
+Glass bottle: 104 anotaciones (2.17%)
+Disposable plastic cup: 104 anotaciones (2.17%)
+Pop tab: 99 anotaciones (2.07%)
+Other carton: 93 anotaciones (1.94%)
+Normal paper: 82 anotaciones (1.71%)
+Metal bottle cap: 80 anotaciones (1.67%)
+Plastic lid: 77 anotaciones (1.61%)
+Paper cup: 67 anotaciones (1.40%)
+Corrugated carton: 64 anotaciones (1.34%)
+
+7. ESTADISTICAS DE BOUNDING BOXES
+--------------------------------------------------------------------------------
+Ancho minimo: 10.00 px
+Ancho maximo: 3758.00 px
+Ancho promedio: 331.43 px
+Alto minimo: 4.00 px
+Alto maximo: 3995.00 px
+Alto promedio: 320.25 px
+Area minima: 80.00 px²
+Area maxima: 10992160.00 px²
+Area promedio: 263954.62 px²
+
+8. OBJETOS POR IMAGEN
+--------------------------------------------------------------------------------
+Minimo de objetos: 1
+Maximo de objetos: 90
+Promedio de objetos: 3.19
+Mediana de objetos: 2.00
+
+9. CALIDAD DE IMAGENES
+--------------------------------------------------------------------------------
+
+Brillo:
+  Minimo: 22.78
+  Maximo: 207.55
+  Promedio: 119.91
+  Mediana: 120.16
+  Desviacion estandar: 27.23
+
+Contraste:
+  Minimo: 15.08
+  Maximo: 83.35
+  Promedio: 52.89
+  Mediana: 54.31
+  Desviacion estandar: 11.99
+
+Ruido:
+  Minimo: 2.85
+  Maximo: 14236.24
+  Promedio: 1169.83
+  Mediana: 710.49
+  Desviacion estandar: 1451.80
+
+10. CASOS EXTREMOS DE BRILLO
+--------------------------------------------------------------------------------
+
+Imagenes MAS BRILLANTES:
+1. batch_3/IMG_4868.JPG - Brillo: 207.55
+2. batch_2/000086.JPG - Brillo: 191.28
+3. batch_3/IMG_4878.JPG - Brillo: 190.33
+
+Imagenes MENOS BRILLANTES:
+1. batch_7/000031.JPG - Brillo: 22.78
+2. batch_3/IMG_5040.JPG - Brillo: 28.27
+3. batch_2/000092.JPG - Brillo: 28.63
+
+11. CASOS EXTREMOS DE CONTRASTE
+--------------------------------------------------------------------------------
+
+Imagenes con MAS CONTRASTE:
+1. batch_12/000070.jpg - Contraste: 83.35
+2. batch_7/000045.JPG - Contraste: 82.63
+3. batch_8/000073.jpg - Contraste: 81.39
+
+Imagenes con MENOS CONTRASTE:
+1. batch_11/000088.jpg - Contraste: 15.08
+2. batch_12/000042.jpg - Contraste: 15.68
+3. batch_3/IMG_4916.JPG - Contraste: 16.62
+
+12. CASOS EXTREMOS DE RUIDO
+--------------------------------------------------------------------------------
+
+Imagenes con MAS RUIDO:
+1. batch_15/000070.jpg - Ruido: 14236.24
+2. batch_15/000024.jpg - Ruido: 13672.79
+3. batch_15/000018.jpg - Ruido: 11527.48
+
+Imagenes con MENOS RUIDO:
+1. batch_12/000065.jpg - Ruido: 2.85
+2. batch_12/000064.jpg - Ruido: 3.58
+3. batch_13/000023.jpg - Ruido: 6.34
+
