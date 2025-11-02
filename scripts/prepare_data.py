@@ -122,7 +122,7 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float, test_spl
     with open(processed_path / 'dataset_stats.json', 'w') as f:
         json.dump(stats, f, indent=2)
 
-    print(f"\nDataset preparation complete!")
+    print(f"Dataset preparation complete!")
     print(f"Total train: {sum(stats['train'].values())}")
     print(f"Total val: {sum(stats['val'].values())}")
     print(f"Total test: {sum(stats['test'].values())}")

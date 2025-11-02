@@ -110,7 +110,7 @@ def main():
     metrics = evaluator.evaluate(dataloader)
 
     # Print metrics
-    print("\nEvaluation Metrics:")
+    print("Evaluation Metrics:")
     print("-" * 50)
     for key, value in metrics.items():
         print(f"{key}: {value:.4f}")
@@ -124,7 +124,7 @@ def main():
     # Per-class accuracy
     per_class_acc = evaluator.per_class_accuracy(dataloader, class_names)
 
-    print("\nPer-Class Accuracy:")
+    print("Per-Class Accuracy:")
     print("-" * 50)
     for class_name, acc in per_class_acc.items():
         print(f"{class_name}: {acc:.4f}")
@@ -150,7 +150,7 @@ def main():
         save_path=output_dir / 'confusion_matrix.png'
     )
 
-    print(f"\nResults saved to {output_dir}")
+    print(f"Results saved to {output_dir}")
 
 
 if __name__ == '__main__':
