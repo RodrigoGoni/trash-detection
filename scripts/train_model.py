@@ -22,6 +22,11 @@ sys.path.append(str(Path(__file__).parent.parent))
 from src.data.taco_dataloader import create_dataloader
 from src.models.detector import TrashDetector
 from src.models.evaluate import ObjectDetectionEvaluator
+from src.utils.debug_utils import (
+    save_batch_with_boxes, 
+    save_predictions_comparison,
+    analyze_batch_statistics
+)
 
 
 def parse_args():
@@ -78,13 +83,27 @@ def log_config_to_mlflow(config: dict):
         mlflow.log_param(f"scheduler_{key}", value)
 
 
-def train_one_epoch(model, dataloader, optimizer, device, epoch):
+def train_one_epoch(model, dataloader, optimizer, device, epoch, debug=False):
     """Train for one epoch."""
     model.train()
     total_loss = 0
     num_batches = 0
     
     for batch_idx, batch in enumerate(dataloader):
+        # Debug: Save first batch of first epoch
+        if debug and batch_idx == 0 and epoch == 1:
+            print("\n=== DEBUG: Analyzing training batch ===")
+            analyze_batch_statistics(batch['images'], batch['bboxes'], batch['labels'])
+            save_batch_with_boxes(
+                batch['images'], 
+                batch['bboxes'], 
+                batch['labels'],
+                save_dir='debug_images/train_input',
+                prefix='train_batch',
+                epoch=epoch
+            )
+            print("=== DEBUG: Done ===\n")
+        
         images = batch['images'].to(device)
         
         # Convert to list of dicts for Faster R-CNN
@@ -146,7 +165,7 @@ def validate(model, dataloader, device):
     return avg_loss
 
 
-def evaluate_with_metrics(model, dataloader, device, num_classes, split='val'):
+def evaluate_with_metrics(model, dataloader, device, num_classes, split='val', verbose=True, debug=False, epoch=None):
     """
     Evaluate model with detection metrics (mAP, Precision, Recall).
     
@@ -156,31 +175,75 @@ def evaluate_with_metrics(model, dataloader, device, num_classes, split='val'):
         device: Device to use
         num_classes: Number of classes
         split: Dataset split name for logging
+        verbose: Whether to print detailed output
+        debug: Whether to save debug visualizations
+        epoch: Current epoch number
     
     Returns:
         Dictionary with all metrics
     """
-    print(f"\nEvaluating on {split} set with detection metrics...")
+    if verbose:
+        print(f"Evaluating on {split} set with detection metrics...")
+    
+    # Use lower threshold during training to see if model is learning
+    score_threshold = 0.05 if split == 'val' else 0.5
     
     evaluator = ObjectDetectionEvaluator(
         model=model,
         device=device,
         num_classes=num_classes,
-        score_threshold=0.5,
+        score_threshold=score_threshold,
         iou_threshold=0.5
     )
     
-    metrics = evaluator.evaluate(dataloader)
+    # Debug: Save predictions for first batch
+    if debug and split == 'val':
+        print("\n=== DEBUG: Analyzing validation predictions ===")
+        batch = next(iter(dataloader))
+        
+        # Analyze input
+        print("Input batch:")
+        analyze_batch_statistics(batch['images'], batch['bboxes'], batch['labels'])
+        
+        # Save input
+        save_batch_with_boxes(
+            batch['images'],
+            batch['bboxes'],
+            batch['labels'],
+            save_dir='debug_images/val_input',
+            prefix='val_input',
+            epoch=epoch
+        )
+        
+        # Get predictions
+        images = batch['images'].to(device)
+        model.eval()
+        with torch.no_grad():
+            predictions = model(images)
+        
+        # Analyze predictions
+        print("\nPredictions:")
+        for i, pred in enumerate(predictions):
+            print(f"  Image {i}: {len(pred['boxes'])} boxes, "
+                  f"scores range [{pred['scores'].min():.4f}, {pred['scores'].max():.4f}]"
+                  f" (>{score_threshold}: {(pred['scores'] >= score_threshold).sum()})")
+        
+        # Save comparison
+        save_predictions_comparison(
+            batch['images'],
+            [p['boxes'] for p in predictions],
+            [p['scores'] for p in predictions],
+            [p['labels'] for p in predictions],
+            batch['bboxes'],
+            batch['labels'],
+            save_dir='debug_images/val_predictions',
+            prefix='val_pred',
+            epoch=epoch,
+            score_threshold=score_threshold
+        )
+        print("=== DEBUG: Done ===\n")
     
-    # Print metrics
-    print(f"\n{split.upper()} Metrics:")
-    print(f"  mAP@0.5: {metrics['mAP']:.4f}")
-    print(f"  Precision: {metrics['precision']:.4f}")
-    print(f"  Recall: {metrics['recall']:.4f}")
-    print(f"  F1-Score: {metrics['f1_score']:.4f}")
-    print(f"  TP: {metrics['true_positives']}, "
-          f"FP: {metrics['false_positives']}, "
-          f"FN: {metrics['false_negatives']}")
+    metrics = evaluator.evaluate(dataloader)
     
     return metrics
 
@@ -211,12 +274,17 @@ def main():
     
     # Create dataloaders
     print("Creating dataloaders...")
+    
+    # Get augmentation config for training
+    augmentation_config = config['data']['augmentation']
+    
     train_loader = create_dataloader(
         processed_dir=config['data']['processed_dir'],
         split='train',
         batch_size=config['data']['batch_size'],
         shuffle=True,
-        num_workers=config['data']['num_workers']
+        num_workers=config['data']['num_workers'],
+        augmentation_config=augmentation_config
     )
     
     val_loader = create_dataloader(
@@ -224,7 +292,8 @@ def main():
         split='val',
         batch_size=config['data']['batch_size'],
         shuffle=False,
-        num_workers=config['data']['num_workers']
+        num_workers=config['data']['num_workers'],
+        augmentation_config=None  # No augmentation for validation
     )
     
     test_loader = create_dataloader(
@@ -232,7 +301,8 @@ def main():
         split='test',
         batch_size=config['data']['batch_size'],
         shuffle=False,
-        num_workers=config['data']['num_workers']
+        num_workers=config['data']['num_workers'],
+        augmentation_config=None  # No augmentation for test
     )
     
     print(f"Train batches: {len(train_loader)}, "
@@ -294,32 +364,51 @@ def main():
             print(f"Epoch {epoch}/{config['training']['num_epochs']}")
             print(f"{'='*60}")
             
-            # Train
-            train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch)
-            print(f"Train Loss: {train_loss:.4f}")
+            # Train (enable debug for first epoch)
+            debug_mode = (epoch == 1)
+            train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch, debug=debug_mode)
+            print(f"\nTrain Loss: {train_loss:.4f}")
             
             # Validate
             val_loss = validate(model, val_loader, device)
             print(f"Val Loss: {val_loss:.4f}")
             
+            # Log basic metrics
+            mlflow.log_metric("train_loss", train_loss, step=epoch)
+            mlflow.log_metric("val_loss", val_loss, step=epoch)
+            mlflow.log_metric("learning_rate", optimizer.param_groups[0]['lr'], step=epoch)
+            
             # Evaluate with detection metrics every 5 epochs
             if epoch % 5 == 0 or epoch == config['training']['num_epochs']:
+                print(f"\n{'-'*60}")
+                print(f"Computing Detection Metrics (Epoch {epoch})...")
+                print(f"{'-'*60}")
+                
                 val_metrics = evaluate_with_metrics(
                     model, val_loader, device, 
                     config['model']['num_classes'], 
-                    split='val'
+                    split='val',
+                    verbose=False,  # Don't print detailed output during training
+                    debug=True,  # Enable debug visualizations
+                    epoch=epoch
                 )
+                
+                # Display metrics in a nice table format
+                print(f"\n{'='*60}")
+                print(f"VALIDATION METRICS (Epoch {epoch}) [score_threshold=0.05]")
+                print(f"{'='*60}")
+                print(f"  mAP@0.5    : {val_metrics['mAP']:.4f}")
+                print(f"  Precision  : {val_metrics['precision']:.4f}")
+                print(f"  Recall     : {val_metrics['recall']:.4f}")
+                print(f"  F1-Score   : {val_metrics['f1_score']:.4f}")
+                print(f"  TP/FP/FN   : {val_metrics['true_positives']}/{val_metrics['false_positives']}/{val_metrics['false_negatives']}")
+                print(f"{'='*60}")
                 
                 # Log detection metrics to MLflow
                 mlflow.log_metric("val_mAP", val_metrics['mAP'], step=epoch)
                 mlflow.log_metric("val_precision", val_metrics['precision'], step=epoch)
                 mlflow.log_metric("val_recall", val_metrics['recall'], step=epoch)
                 mlflow.log_metric("val_f1_score", val_metrics['f1_score'], step=epoch)
-            
-            # Log metrics
-            mlflow.log_metric("train_loss", train_loss, step=epoch)
-            mlflow.log_metric("val_loss", val_loss, step=epoch)
-            mlflow.log_metric("learning_rate", optimizer.param_groups[0]['lr'], step=epoch)
             
             # Learning rate scheduler step
             scheduler.step()
@@ -338,7 +427,7 @@ def main():
                     'config': config
                 }, best_model_path)
                 
-                print(f"✓ Saved best model (val_loss: {val_loss:.4f})")
+                print(f">> Saved best model (val_loss: {val_loss:.4f})")
                 
                 # Log to MLflow
                 mlflow.log_artifact(str(best_model_path))
@@ -365,11 +454,24 @@ def main():
         model.load_state_dict(checkpoint['model_state_dict'])
         
         # Evaluate on test set with detection metrics
+        print("Evaluating best model on test set...")
         test_metrics = evaluate_with_metrics(
             model, test_loader, device,
             config['model']['num_classes'],
-            split='test'
+            split='test',
+            verbose=True  # Show detailed output for final evaluation
         )
+        
+        # Print detailed test metrics
+        print(f"\n{'='*60}")
+        print(f"FINAL TEST SET METRICS")
+        print(f"{'='*60}")
+        print(f"  mAP@0.5    : {test_metrics['mAP']:.4f}")
+        print(f"  Precision  : {test_metrics['precision']:.4f}")
+        print(f"  Recall     : {test_metrics['recall']:.4f}")
+        print(f"  F1-Score   : {test_metrics['f1_score']:.4f}")
+        print(f"  TP/FP/FN   : {test_metrics['true_positives']}/{test_metrics['false_positives']}/{test_metrics['false_negatives']}")
+        print(f"{'='*60}")
         
         # Log test metrics to MLflow
         mlflow.log_metric("test_mAP", test_metrics['mAP'])
@@ -391,15 +493,23 @@ def main():
         mlflow.log_artifact(str(test_metrics_path))
         
         print(f"\n{'='*60}")
-        print(f"Training completed!")
-        print(f"Best validation loss: {best_val_loss:.4f}")
-        print(f"Test mAP@0.5: {test_metrics['mAP']:.4f}")
-        print(f"Test Precision: {test_metrics['precision']:.4f}")
-        print(f"Test Recall: {test_metrics['recall']:.4f}")
-        print(f"Test F1-Score: {test_metrics['f1_score']:.4f}")
-        print(f"Best model saved to: {best_model_path}")
-        print(f"Test metrics saved to: {test_metrics_path}")
+        print(f"TRAINING COMPLETED")
         print(f"{'='*60}")
+        print(f"\nTraining Summary:")
+        print(f"  Total Epochs     : {epoch}")
+        print(f"  Best Val Loss    : {best_val_loss:.4f}")
+        print(f"\nFinal Test Set Performance:")
+        print(f"  mAP@0.5          : {test_metrics['mAP']:.4f}")
+        print(f"  Precision        : {test_metrics['precision']:.4f}")
+        print(f"  Recall           : {test_metrics['recall']:.4f}")
+        print(f"  F1-Score         : {test_metrics['f1_score']:.4f}")
+        print(f"\nSaved Artifacts:")
+        print(f"  Best model       : {best_model_path}")
+        print(f"  Test metrics     : {test_metrics_path}")
+        print(f"\nView results in MLflow:")
+        print(f"  mlflow ui")
+        print(f"  http://localhost:5000")
+        print(f"{'='*60}\n")
 
 
 if __name__ == '__main__':

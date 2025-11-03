@@ -25,14 +25,15 @@ def get_transforms(
     img_size: int = 640,
     normalize: bool = True,
     mean: Tuple[float, float, float] = (0.485, 0.456, 0.406),
-    std: Tuple[float, float, float] = (0.229, 0.224, 0.225)
+    std: Tuple[float, float, float] = (0.229, 0.224, 0.225),
+    augmentation_config: Optional[Dict] = None
 ) -> A.Compose:
     """
     Get preprocessing and augmentation pipeline for object detection.
 
     This function returns an Albumentations pipeline that:
     1. Resizes images while preserving aspect ratio (letterboxing)
-    2. Applies data augmentation (only in train mode)
+    2. Applies data augmentation (only in train mode, based on config)
     3. Normalizes pixel values
     4. Automatically handles bounding box transformations
 
@@ -42,82 +43,105 @@ def get_transforms(
         normalize: Whether to normalize images with mean/std
         mean: RGB mean values for normalization (ImageNet defaults)
         std: RGB std values for normalization (ImageNet defaults)
+        augmentation_config: Dict with augmentation parameters (probabilities and limits)
 
     Returns:
         Albumentations Compose object with the full pipeline
 
     Example:
-        >>> transform = get_transforms(mode='train', img_size=640)
+        >>> aug_config = {
+        ...     'horizontal_flip_p': 0.5,
+        ...     'brightness_contrast_p': 0.3,
+        ...     'brightness_limit': 0.2,
+        ...     'contrast_limit': 0.2
+        ... }
+        >>> transform = get_transforms(mode='train', img_size=640, augmentation_config=aug_config)
         >>> transformed = transform(image=image, bboxes=bboxes, labels=labels)
-        >>> img_transformed = transformed['image']
-        >>> bboxes_transformed = transformed['bboxes']
     """
+    
+    # Default augmentation config (all disabled for baseline)
+    if augmentation_config is None:
+        augmentation_config = {
+            'horizontal_flip_p': 0.0,
+            'vertical_flip_p': 0.0,
+            'shift_scale_rotate_p': 0.0,
+            'brightness_contrast_p': 0.0,
+            'hue_saturation_p': 0.0,
+            'blur_p': 0.0,
+            'noise_p': 0.0,
+            'cutout_p': 0.0
+        }
 
     if mode == 'train':
-        # Training pipeline with augmentation
+        # Training pipeline with configurable augmentations
         transforms = [
-            # 1. Letterbox resize (maintains aspect ratio, pads to square)
+            # 1. Letterbox resize (maintains aspect ratio, pads to square) - ALWAYS applied
             A.LongestMaxSize(max_size=img_size, p=1.0),
             A.PadIfNeeded(
                 min_height=img_size,
                 min_width=img_size,
                 border_mode=cv2.BORDER_CONSTANT,
-                value=(114, 114, 114),  # Gray padding
                 p=1.0
             ),
-
-            # 2. Geometric augmentations
-            A.HorizontalFlip(p=0.5),
-            A.ShiftScaleRotate(
-                shift_limit=0.1,
-                scale_limit=0.2,
-                rotate_limit=15,
-                border_mode=cv2.BORDER_CONSTANT,
-                value=(114, 114, 114),
-                p=0.5
-            ),
-
-            # 3. Photometric augmentations (address brightness/contrast variability)
-            A.RandomBrightnessContrast(
-                brightness_limit=0.3,
-                contrast_limit=0.3,
-                p=0.5
-            ),
-            A.OneOf([
-                A.MotionBlur(blur_limit=3, p=1.0),
-                A.MedianBlur(blur_limit=3, p=1.0),
-                A.GaussianBlur(blur_limit=3, p=1.0),
-            ], p=0.3),
-
-            # Add noise simulation (to make model robust to noisy images)
-            A.OneOf([
-                A.GaussNoise(var_limit=(10.0, 50.0), p=1.0),
-                A.ISONoise(p=1.0),
-            ], p=0.3),
-
-            # Color augmentations
-            A.HueSaturationValue(
-                hue_shift_limit=20,
-                sat_shift_limit=30,
-                val_shift_limit=20,
-                p=0.5
-            ),
-
-            # Cutout augmentation (simulate occlusions)
-            A.CoarseDropout(
-                max_holes=8,
-                max_height=32,
-                max_width=32,
-                min_holes=1,
-                min_height=8,
-                min_width=8,
-                fill_value=114,
-                p=0.3
-            ),
-
-            # 4. Normalization and tensor conversion
-            A.Normalize(mean=mean, std=std) if normalize else A.NoOp(),
         ]
+        
+        # 2. Geometric augmentations (configurable)
+        if augmentation_config.get('horizontal_flip_p', 0.0) > 0:
+            transforms.append(A.HorizontalFlip(p=augmentation_config['horizontal_flip_p']))
+        
+        if augmentation_config.get('vertical_flip_p', 0.0) > 0:
+            transforms.append(A.VerticalFlip(p=augmentation_config['vertical_flip_p']))
+        
+        if augmentation_config.get('shift_scale_rotate_p', 0.0) > 0:
+            transforms.append(A.ShiftScaleRotate(
+                shift_limit=augmentation_config.get('shift_limit', 0.0),
+                scale_limit=augmentation_config.get('scale_limit', 0.0),
+                rotate_limit=augmentation_config.get('rotate_limit', 0),
+                border_mode=cv2.BORDER_CONSTANT,
+                p=augmentation_config['shift_scale_rotate_p']
+            ))
+        
+        # 3. Photometric augmentations (configurable, don't affect bboxes)
+        if augmentation_config.get('brightness_contrast_p', 0.0) > 0:
+            transforms.append(A.RandomBrightnessContrast(
+                brightness_limit=augmentation_config.get('brightness_limit', 0.0),
+                contrast_limit=augmentation_config.get('contrast_limit', 0.0),
+                p=augmentation_config['brightness_contrast_p']
+            ))
+        
+        if augmentation_config.get('hue_saturation_p', 0.0) > 0:
+            transforms.append(A.HueSaturationValue(
+                hue_shift_limit=augmentation_config.get('hue_shift_limit', 0),
+                sat_shift_limit=augmentation_config.get('sat_shift_limit', 0),
+                val_shift_limit=augmentation_config.get('val_shift_limit', 0),
+                p=augmentation_config['hue_saturation_p']
+            ))
+        
+        if augmentation_config.get('blur_p', 0.0) > 0:
+            blur_limit = augmentation_config.get('blur_limit', 3)
+            transforms.append(A.OneOf([
+                A.MotionBlur(blur_limit=blur_limit, p=1.0),
+                A.MedianBlur(blur_limit=blur_limit, p=1.0),
+                A.GaussianBlur(blur_limit=blur_limit, p=1.0),
+            ], p=augmentation_config['blur_p']))
+        
+        if augmentation_config.get('noise_p', 0.0) > 0:
+            transforms.append(A.OneOf([
+                A.GaussNoise(p=1.0),
+                A.ISONoise(p=1.0),
+            ], p=augmentation_config['noise_p']))
+        
+        if augmentation_config.get('cutout_p', 0.0) > 0:
+            transforms.append(A.CoarseDropout(
+                max_holes=augmentation_config.get('cutout_max_holes', 8),
+                max_height=augmentation_config.get('cutout_max_height', 32),
+                max_width=augmentation_config.get('cutout_max_width', 32),
+                fill_value=114,
+                p=augmentation_config['cutout_p']
+            ))
+        
+        # 4. Normalization (always at the end)
+        transforms.append(A.Normalize(mean=mean, std=std) if normalize else A.NoOp())
 
     else:  # val or test mode
         # Validation/Test pipeline (no augmentation, only preprocessing)
@@ -127,21 +151,22 @@ def get_transforms(
                 min_height=img_size,
                 min_width=img_size,
                 border_mode=cv2.BORDER_CONSTANT,
-                value=(114, 114, 114),
                 p=1.0
             ),
             A.Normalize(mean=mean, std=std) if normalize else A.NoOp(),
         ]
 
     # Compose with bbox parameters
-    # bbox_params specifies format and minimum visibility threshold
+    # CRITICAL: clip_bboxes ensures bboxes stay within image bounds
     return A.Compose(
         transforms,
         bbox_params=A.BboxParams(
             format='pascal_voc',  # (x_min, y_min, x_max, y_max)
             label_fields=['labels'],  # Field containing class labels
-            min_area=25,  # Remove boxes smaller than 25 pixels²
-            min_visibility=0.3,  # Remove boxes with <30% visible after transforms
+            min_area=16,  # Remove boxes smaller than 16 pixels² (4x4)
+            min_visibility=0.2,  # Remove boxes with <20% visible after transforms
+            clip=True,  # CRITICAL: clip bboxes to image bounds
+            check_each_transform=True  # Check bbox validity after each transform
         )
     )
 
@@ -299,7 +324,8 @@ class TACOPreprocessor:
         mode: str = 'train',
         img_size: int = 640,
         normalize: bool = True,
-        bbox_format: str = 'pascal_voc'
+        bbox_format: str = 'pascal_voc',
+        augmentation_config: Optional[Dict] = None
     ):
         """
         Initialize preprocessor.
@@ -309,13 +335,19 @@ class TACOPreprocessor:
             img_size: Target image size
             normalize: Whether to normalize images
             bbox_format: Output bbox format ('pascal_voc', 'coco', 'yolo')
+            augmentation_config: Dictionary with augmentation parameters
         """
         self.mode = mode
         self.img_size = img_size
         self.normalize = normalize
         self.bbox_format = bbox_format
+        self.augmentation_config = augmentation_config
         self.transform = get_transforms(
-            mode=mode, img_size=img_size, normalize=normalize)
+            mode=mode, 
+            img_size=img_size, 
+            normalize=normalize,
+            augmentation_config=augmentation_config
+        )
 
     def __call__(
         self,
@@ -328,45 +360,35 @@ class TACOPreprocessor:
 
         Args:
             image: Input image (H, W, C) in RGB format
-            bboxes: List of bounding boxes in Pascal VOC format
+            bboxes: List of bounding boxes in Pascal VOC format [[x_min, y_min, x_max, y_max], ...]
             labels: List of class labels (one per bbox)
 
         Returns:
             Dictionary with:
-                - 'image': Transformed image
-                - 'bboxes': Transformed bounding boxes
-                - 'labels': Labels (unchanged)
+                - 'image': Transformed image (H, W, C) numpy array
+                - 'bboxes': Transformed bounding boxes (list of lists)
+                - 'labels': Labels (list, unchanged order)
         """
-        # Apply transformations
+        # Ensure bboxes are in correct format for Albumentations
+        # Must be list of [x_min, y_min, x_max, y_max] with all floats
+        bboxes_clean = []
+        labels_clean = []
+        
+        for bbox, label in zip(bboxes, labels):
+            # Ensure all coordinates are floats
+            x_min, y_min, x_max, y_max = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+            
+            # Basic validation
+            if x_max > x_min and y_max > y_min:
+                bboxes_clean.append([x_min, y_min, x_max, y_max])
+                labels_clean.append(int(label))
+        
+        # Apply transformations - Albumentations handles bbox transformations automatically
         transformed = self.transform(
             image=image,
-            bboxes=bboxes,
-            labels=labels
+            bboxes=bboxes_clean,
+            labels=labels_clean
         )
-        
-        # Clip bboxes to image boundaries (fix out-of-bounds after transformations)
-        h, w = transformed['image'].shape[:2]
-        clipped_bboxes = []
-        clipped_labels = []
-        
-        for bbox, label in zip(transformed['bboxes'], transformed['labels']):
-            x_min, y_min, x_max, y_max = bbox[:4]
-            # Clip to valid range
-            x_min = max(0, min(x_min, w - 1))
-            y_min = max(0, min(y_min, h - 1))
-            x_max = max(x_min + 1, min(x_max, w))
-            y_max = max(y_min + 1, min(y_max, h))
-            
-            # Keep bbox if it has valid area
-            if (x_max - x_min) > 1 and (y_max - y_min) > 1:
-                if len(bbox) > 4:
-                    clipped_bboxes.append([x_min, y_min, x_max, y_max] + list(bbox[4:]))
-                else:
-                    clipped_bboxes.append([x_min, y_min, x_max, y_max])
-                clipped_labels.append(label)
-        
-        transformed['bboxes'] = clipped_bboxes
-        transformed['labels'] = clipped_labels
 
         # Convert bbox format if needed
         if self.bbox_format == 'yolo':
@@ -401,7 +423,6 @@ class TACOPreprocessor:
                 min_height=self.img_size,
                 min_width=self.img_size,
                 border_mode=cv2.BORDER_CONSTANT,
-                value=(114, 114, 114),
                 p=1.0
             ),
             A.Normalize(

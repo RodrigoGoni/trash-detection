@@ -5,9 +5,10 @@ experiment:
   name: "taco_detection_baseline"
   tags:
     - "baseline"
+    - "no_augmentation"
     - "faster_rcnn"
     - "resnet50"
-  description: "Faster R-CNN baseline for TACO object detection"
+  description: "Faster R-CNN baseline WITHOUT augmentation (only letterbox) for TACO object detection"
 
 # Data settings
 data:
@@ -25,19 +26,39 @@ data:
     bbox_format: "pascal_voc"
   
   # Augmentation parameters for train set
+  # BASELINE: All augmentations disabled (set to 0.0)
+  # Enable gradually after baseline training
   augmentation:
-    horizontal_flip_p: 0.5
-    shift_scale_rotate_p: 0.5
-    shift_limit: 0.1
-    scale_limit: 0.2
-    rotate_limit: 15
-    brightness_contrast_p: 0.5
-    brightness_limit: 0.3
-    contrast_limit: 0.3
-    blur_p: 0.3
-    noise_p: 0.3
-    hue_saturation_p: 0.5
-    cutout_p: 0.3
+    # Geometric augmentations
+    horizontal_flip_p: 0.0
+    vertical_flip_p: 0.0
+    shift_scale_rotate_p: 0.0
+    shift_limit: 0.0
+    scale_limit: 0.0
+    rotate_limit: 0
+    
+    # Photometric augmentations
+    brightness_contrast_p: 0.0
+    brightness_limit: 0.0
+    contrast_limit: 0.0
+    
+    hue_saturation_p: 0.0
+    hue_shift_limit: 0
+    sat_shift_limit: 0
+    val_shift_limit: 0
+    
+    # Blur augmentations
+    blur_p: 0.0
+    blur_limit: 3
+    
+    # Noise augmentations
+    noise_p: 0.0
+    
+    # Cutout/dropout augmentations
+    cutout_p: 0.0
+    cutout_max_holes: 0
+    cutout_max_height: 0
+    cutout_max_width: 0
 
 # Model settings
 model:

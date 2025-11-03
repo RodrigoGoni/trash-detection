@@ -97,7 +97,7 @@ def create_split_annotations(data: dict, split_images: list, split_name: str) ->
 
 
 def copy_images(raw_dir: Path, processed_dir: Path, split_images: list, split_name: str) -> None:
-    """Copy images to processed directory."""
+    """Copy images to processed directory, maintaining batch_X subdirectory structure."""
     output_dir = processed_dir / split_name / 'images'
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -105,8 +105,13 @@ def copy_images(raw_dir: Path, processed_dir: Path, split_images: list, split_na
     for img in split_images:
         src_path = raw_dir / img['file_name']
         if src_path.exists():
-            dst_path = output_dir / Path(img['file_name']).name
+            # CRITICAL: Maintain batch_X/ subdirectory structure to avoid filename collisions
+            # file_name is like "batch_1/000000.jpg"
+            dst_path = output_dir / img['file_name']
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src_path, dst_path)
+        else:
+            print(f"    Warning: Source image not found: {src_path}")
 
 
 def compute_statistics(data: dict, train_data: dict, val_data: dict, test_data: dict) -> dict:

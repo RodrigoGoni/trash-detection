@@ -175,7 +175,7 @@ def main():
         
         json.dump(json_metrics, f, indent=2)
     
-    print(f"\n✓ Metrics saved to: {output_path}")
+    print(f"\n>> Metrics saved to: {output_path}")
     
     # Print top 10 and bottom 10 classes if available
     if per_class_ap and len(per_class_ap) > 10:

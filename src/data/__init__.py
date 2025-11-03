@@ -1,6 +1,6 @@
 """Data processing and loading modules"""
 
-from .dataloader import TrashDataset, get_dataloaders
+from .taco_dataloader import TACODetectionDataset, create_dataloader, collate_fn
 from .preprocessing import (
     get_transforms,
     get_inference_transforms,
@@ -10,12 +10,12 @@ from .preprocessing import (
     convert_pascal_to_yolo,
     validate_bbox
 )
-from .augmentation import get_train_transforms, get_val_transforms
 
 __all__ = [
     # DataLoader
-    'TrashDataset',
-    'get_dataloaders',
+    'TACODetectionDataset',
+    'create_dataloader',
+    'collate_fn',
 
     # Preprocessing
     'get_transforms',
@@ -25,8 +25,4 @@ __all__ = [
     'convert_pascal_to_coco',
     'convert_pascal_to_yolo',
     'validate_bbox',
-
-    # Augmentation
-    'get_train_transforms',
-    'get_val_transforms',
 ]

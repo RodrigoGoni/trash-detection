@@ -27,10 +27,12 @@ class TACODetectionDataset(Dataset):
         img_size: Target image size (default: 640)
         normalize: Whether to normalize images (default: True)
         bbox_format: Output bbox format (default: 'pascal_voc')
+        augmentation_config: Dictionary with augmentation parameters (for train split)
     """
     
     def __init__(self, processed_dir: str, split: str = 'train', img_size: int = 640,
-                 normalize: bool = True, bbox_format: str = 'pascal_voc'):
+                 normalize: bool = True, bbox_format: str = 'pascal_voc',
+                 augmentation_config: Optional[Dict] = None):
         self.processed_dir = Path(processed_dir)
         self.split = split
         
@@ -59,9 +61,14 @@ class TACODetectionDataset(Dataset):
         # Filter valid images
         self.valid_images = [img for img in self.images if img['id'] in self.img_to_anns]
         
-        # Preprocessor
-        self.preprocessor = TACOPreprocessor(mode=split, img_size=img_size,
-                                            normalize=normalize, bbox_format=bbox_format)
+        # Preprocessor with augmentation config
+        self.preprocessor = TACOPreprocessor(
+            mode=split, 
+            img_size=img_size,
+            normalize=normalize, 
+            bbox_format=bbox_format,
+            augmentation_config=augmentation_config if split == 'train' else None
+        )
     
     def __len__(self) -> int:
         return len(self.valid_images)
@@ -73,11 +80,20 @@ class TACODetectionDataset(Dataset):
             try:
                 current_idx = (idx + attempt) % len(self)
                 img_info = self.valid_images[current_idx]
-                img_filename = Path(img_info['file_name']).name
-                img_path = self.processed_dir / self.split / 'images' / img_filename
+                
+                # Use the full file_name path (includes batch_X/ subdirectory)
+                img_path = self.processed_dir / self.split / 'images' / img_info['file_name']
                 
                 # Load image
+                if not img_path.exists():
+                    print(f"Warning: Image not found: {img_path}")
+                    continue
+                    
                 image = cv2.imread(str(img_path))
+                if image is None:
+                    print(f"Warning: Failed to load image: {img_path}")
+                    continue
+                    
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 orig_h, orig_w = image.shape[:2]
                 
@@ -87,27 +103,25 @@ class TACODetectionDataset(Dataset):
                 labels = []
                 
                 for ann in annotations:
-                    bbox_coco = ann['bbox']
-                    bbox_pascal = convert_coco_to_pascal(bbox_coco, img_info['width'], 
-                                                         img_info['height'])
-                    if validate_bbox(bbox_pascal, img_info['width'], img_info['height']):
-                        # Clip bbox to image boundaries to prevent Albumentations errors
-                        x_min, y_min, x_max, y_max = bbox_pascal
-                        x_min = max(0, min(x_min, orig_w - 1))
-                        y_min = max(0, min(y_min, orig_h - 1))
-                        x_max = max(x_min + 1, min(x_max, orig_w))
-                        y_max = max(y_min + 1, min(y_max, orig_h))
-                        
-                        # Only keep if bbox still has valid area
-                        if (x_max - x_min) > 1 and (y_max - y_min) > 1:
-                            bboxes.append([x_min, y_min, x_max, y_max])
-                            labels.append(ann['category_id'])
+                    bbox_coco = ann['bbox']  # [x, y, width, height]
+                    
+                    # Convert COCO to Pascal VOC
+                    x, y, w, h = bbox_coco
+                    x_min = float(max(0, x))
+                    y_min = float(max(0, y))
+                    x_max = float(min(orig_w, x + w))
+                    y_max = float(min(orig_h, y + h))
+                    
+                    # Validate bbox
+                    if (x_max - x_min) >= 2 and (y_max - y_min) >= 2:
+                        bboxes.append([x_min, y_min, x_max, y_max])
+                        labels.append(int(ann['category_id']))
                 
                 # Skip if no valid bboxes
                 if len(bboxes) == 0:
                     continue
                 
-                # Apply preprocessing
+                # Apply preprocessing (Albumentations will handle bbox transformations)
                 result = self.preprocessor(image, bboxes, labels)
                 
                 # Skip if all bboxes were filtered out during augmentation
@@ -168,7 +182,8 @@ def collate_fn(batch: List[Dict]) -> Dict[str, List]:
 
 def create_dataloader(processed_dir: str, split: str = 'train', batch_size: int = 16,
                      img_size: int = 640, num_workers: int = 4, 
-                     shuffle: Optional[bool] = None, pin_memory: bool = True) -> DataLoader:
+                     shuffle: Optional[bool] = None, pin_memory: bool = True,
+                     augmentation_config: Optional[Dict] = None) -> DataLoader:
     """
     Create a DataLoader for TACO dataset.
     
@@ -180,6 +195,7 @@ def create_dataloader(processed_dir: str, split: str = 'train', batch_size: int 
         num_workers: Number of worker processes
         shuffle: Whether to shuffle (None = auto based on split)
         pin_memory: Pin memory for faster GPU transfer
+        augmentation_config: Dictionary with augmentation parameters (for train split)
     
     Returns:
         PyTorch DataLoader
@@ -187,7 +203,12 @@ def create_dataloader(processed_dir: str, split: str = 'train', batch_size: int 
     if shuffle is None:
         shuffle = (split == 'train')
     
-    dataset = TACODetectionDataset(processed_dir=processed_dir, split=split, img_size=img_size)
+    dataset = TACODetectionDataset(
+        processed_dir=processed_dir, 
+        split=split, 
+        img_size=img_size,
+        augmentation_config=augmentation_config
+    )
     
     dataloader = DataLoader(
         dataset,
