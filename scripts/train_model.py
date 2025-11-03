@@ -14,12 +14,14 @@ import torch
 import torch.nn as nn
 import mlflow
 import mlflow.pytorch
+import numpy as np
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from src.data.taco_dataloader import create_dataloader
 from src.models.detector import TrashDetector
+from src.models.evaluate import ObjectDetectionEvaluator
 
 
 def parse_args():
@@ -144,6 +146,45 @@ def validate(model, dataloader, device):
     return avg_loss
 
 
+def evaluate_with_metrics(model, dataloader, device, num_classes, split='val'):
+    """
+    Evaluate model with detection metrics (mAP, Precision, Recall).
+    
+    Args:
+        model: Detection model
+        dataloader: DataLoader for evaluation
+        device: Device to use
+        num_classes: Number of classes
+        split: Dataset split name for logging
+    
+    Returns:
+        Dictionary with all metrics
+    """
+    print(f"\nEvaluating on {split} set with detection metrics...")
+    
+    evaluator = ObjectDetectionEvaluator(
+        model=model,
+        device=device,
+        num_classes=num_classes,
+        score_threshold=0.5,
+        iou_threshold=0.5
+    )
+    
+    metrics = evaluator.evaluate(dataloader)
+    
+    # Print metrics
+    print(f"\n{split.upper()} Metrics:")
+    print(f"  mAP@0.5: {metrics['mAP']:.4f}")
+    print(f"  Precision: {metrics['precision']:.4f}")
+    print(f"  Recall: {metrics['recall']:.4f}")
+    print(f"  F1-Score: {metrics['f1_score']:.4f}")
+    print(f"  TP: {metrics['true_positives']}, "
+          f"FP: {metrics['false_positives']}, "
+          f"FN: {metrics['false_negatives']}")
+    
+    return metrics
+
+
 def main():
     """Main training function."""
     # Parse arguments
@@ -186,7 +227,17 @@ def main():
         num_workers=config['data']['num_workers']
     )
     
-    print(f"Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
+    test_loader = create_dataloader(
+        processed_dir=config['data']['processed_dir'],
+        split='test',
+        batch_size=config['data']['batch_size'],
+        shuffle=False,
+        num_workers=config['data']['num_workers']
+    )
+    
+    print(f"Train batches: {len(train_loader)}, "
+          f"Val batches: {len(val_loader)}, "
+          f"Test batches: {len(test_loader)}")
     
     # Create model
     print("Creating model...")
@@ -251,6 +302,20 @@ def main():
             val_loss = validate(model, val_loader, device)
             print(f"Val Loss: {val_loss:.4f}")
             
+            # Evaluate with detection metrics every 5 epochs
+            if epoch % 5 == 0 or epoch == config['training']['num_epochs']:
+                val_metrics = evaluate_with_metrics(
+                    model, val_loader, device, 
+                    config['model']['num_classes'], 
+                    split='val'
+                )
+                
+                # Log detection metrics to MLflow
+                mlflow.log_metric("val_mAP", val_metrics['mAP'], step=epoch)
+                mlflow.log_metric("val_precision", val_metrics['precision'], step=epoch)
+                mlflow.log_metric("val_recall", val_metrics['recall'], step=epoch)
+                mlflow.log_metric("val_f1_score", val_metrics['f1_score'], step=epoch)
+            
             # Log metrics
             mlflow.log_metric("train_loss", train_loss, step=epoch)
             mlflow.log_metric("val_loss", val_loss, step=epoch)
@@ -290,10 +355,50 @@ def main():
         mlflow.log_metric("best_val_loss", best_val_loss)
         mlflow.log_metric("total_epochs", epoch)
         
+        # Final evaluation on test set
+        print(f"\n{'='*60}")
+        print("Final Evaluation on Test Set")
+        print(f"{'='*60}")
+        
+        # Load best model
+        checkpoint = torch.load(best_model_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Evaluate on test set with detection metrics
+        test_metrics = evaluate_with_metrics(
+            model, test_loader, device,
+            config['model']['num_classes'],
+            split='test'
+        )
+        
+        # Log test metrics to MLflow
+        mlflow.log_metric("test_mAP", test_metrics['mAP'])
+        mlflow.log_metric("test_precision", test_metrics['precision'])
+        mlflow.log_metric("test_recall", test_metrics['recall'])
+        mlflow.log_metric("test_f1_score", test_metrics['f1_score'])
+        mlflow.log_metric("test_true_positives", test_metrics['true_positives'])
+        mlflow.log_metric("test_false_positives", test_metrics['false_positives'])
+        mlflow.log_metric("test_false_negatives", test_metrics['false_negatives'])
+        
+        # Save test metrics to JSON
+        test_metrics_path = checkpoint_dir / 'test_metrics.json'
+        with open(test_metrics_path, 'w') as f:
+            # Convert numpy types to native Python types for JSON serialization
+            json_metrics = {k: float(v) if isinstance(v, (np.floating, np.integer)) else v 
+                           for k, v in test_metrics.items()}
+            json.dump(json_metrics, f, indent=2)
+        
+        mlflow.log_artifact(str(test_metrics_path))
+        
         print(f"\n{'='*60}")
         print(f"Training completed!")
         print(f"Best validation loss: {best_val_loss:.4f}")
+        print(f"Test mAP@0.5: {test_metrics['mAP']:.4f}")
+        print(f"Test Precision: {test_metrics['precision']:.4f}")
+        print(f"Test Recall: {test_metrics['recall']:.4f}")
+        print(f"Test F1-Score: {test_metrics['f1_score']:.4f}")
         print(f"Best model saved to: {best_model_path}")
+        print(f"Test metrics saved to: {test_metrics_path}")
         print(f"{'='*60}")
 
 
