@@ -22,11 +22,6 @@ sys.path.append(str(Path(__file__).parent.parent))
 from src.data.taco_dataloader import create_dataloader
 from src.models.detector import TrashDetector
 from src.models.evaluate import ObjectDetectionEvaluator
-from src.utils.debug_utils import (
-    save_batch_with_boxes, 
-    save_predictions_comparison,
-    analyze_batch_statistics
-)
 
 
 def parse_args():
@@ -90,19 +85,6 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, debug=False):
     num_batches = 0
     
     for batch_idx, batch in enumerate(dataloader):
-        # Debug: Save first batch of first epoch
-        if debug and batch_idx == 0 and epoch == 1:
-            print("\n=== DEBUG: Analyzing training batch ===")
-            analyze_batch_statistics(batch['images'], batch['bboxes'], batch['labels'])
-            save_batch_with_boxes(
-                batch['images'], 
-                batch['bboxes'], 
-                batch['labels'],
-                save_dir='debug_images/train_input',
-                prefix='train_batch',
-                epoch=epoch
-            )
-            print("=== DEBUG: Done ===\n")
         
         images = batch['images'].to(device)
         

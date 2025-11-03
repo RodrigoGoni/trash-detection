@@ -1,6 +1,5 @@
 """Model architecture modules"""
 
-from .classifier import TrashClassifier
 from .detector import TrashDetector
 from .backbone import get_backbone
 
