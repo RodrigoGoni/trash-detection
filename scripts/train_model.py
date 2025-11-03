@@ -78,14 +78,13 @@ def log_config_to_mlflow(config: dict):
         mlflow.log_param(f"scheduler_{key}", value)
 
 
-def train_one_epoch(model, dataloader, optimizer, device, epoch, debug=False):
+def train_one_epoch(model, dataloader, optimizer, device, epoch):
     """Train for one epoch."""
     model.train()
     total_loss = 0
     num_batches = 0
     
     for batch_idx, batch in enumerate(dataloader):
-        
         images = batch['images'].to(device)
         
         # Convert to list of dicts for Faster R-CNN
@@ -147,7 +146,7 @@ def validate(model, dataloader, device):
     return avg_loss
 
 
-def evaluate_with_metrics(model, dataloader, device, num_classes, split='val', verbose=True, debug=False, epoch=None):
+def evaluate_with_metrics(model, dataloader, device, num_classes, split='val', verbose=True):
     """
     Evaluate model with detection metrics (mAP, Precision, Recall).
     
@@ -158,8 +157,6 @@ def evaluate_with_metrics(model, dataloader, device, num_classes, split='val', v
         num_classes: Number of classes
         split: Dataset split name for logging
         verbose: Whether to print detailed output
-        debug: Whether to save debug visualizations
-        epoch: Current epoch number
     
     Returns:
         Dictionary with all metrics
@@ -177,53 +174,6 @@ def evaluate_with_metrics(model, dataloader, device, num_classes, split='val', v
         score_threshold=score_threshold,
         iou_threshold=0.5
     )
-    
-    # Debug: Save predictions for first batch
-    if debug and split == 'val':
-        print("\n=== DEBUG: Analyzing validation predictions ===")
-        batch = next(iter(dataloader))
-        
-        # Analyze input
-        print("Input batch:")
-        analyze_batch_statistics(batch['images'], batch['bboxes'], batch['labels'])
-        
-        # Save input
-        save_batch_with_boxes(
-            batch['images'],
-            batch['bboxes'],
-            batch['labels'],
-            save_dir='debug_images/val_input',
-            prefix='val_input',
-            epoch=epoch
-        )
-        
-        # Get predictions
-        images = batch['images'].to(device)
-        model.eval()
-        with torch.no_grad():
-            predictions = model(images)
-        
-        # Analyze predictions
-        print("\nPredictions:")
-        for i, pred in enumerate(predictions):
-            print(f"  Image {i}: {len(pred['boxes'])} boxes, "
-                  f"scores range [{pred['scores'].min():.4f}, {pred['scores'].max():.4f}]"
-                  f" (>{score_threshold}: {(pred['scores'] >= score_threshold).sum()})")
-        
-        # Save comparison
-        save_predictions_comparison(
-            batch['images'],
-            [p['boxes'] for p in predictions],
-            [p['scores'] for p in predictions],
-            [p['labels'] for p in predictions],
-            batch['bboxes'],
-            batch['labels'],
-            save_dir='debug_images/val_predictions',
-            prefix='val_pred',
-            epoch=epoch,
-            score_threshold=score_threshold
-        )
-        print("=== DEBUG: Done ===\n")
     
     metrics = evaluator.evaluate(dataloader)
     
@@ -346,9 +296,8 @@ def main():
             print(f"Epoch {epoch}/{config['training']['num_epochs']}")
             print(f"{'='*60}")
             
-            # Train (enable debug for first epoch)
-            debug_mode = (epoch == 1)
-            train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch, debug=debug_mode)
+            # Train
+            train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch)
             print(f"\nTrain Loss: {train_loss:.4f}")
             
             # Validate
@@ -370,9 +319,7 @@ def main():
                     model, val_loader, device, 
                     config['model']['num_classes'], 
                     split='val',
-                    verbose=False,  # Don't print detailed output during training
-                    debug=True,  # Enable debug visualizations
-                    epoch=epoch
+                    verbose=False
                 )
                 
                 # Display metrics in a nice table format

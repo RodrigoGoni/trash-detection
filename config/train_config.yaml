@@ -13,7 +13,7 @@ experiment:
 # Data settings
 data:
   processed_dir: "./data/processed"
-  batch_size: 8
+  batch_size: 32
   num_workers: 4
   img_size: 640
   dataset_version: "v1.0"  # Track dataset version
