@@ -343,6 +343,30 @@ class TACOPreprocessor:
             bboxes=bboxes,
             labels=labels
         )
+        
+        # Clip bboxes to image boundaries (fix out-of-bounds after transformations)
+        h, w = transformed['image'].shape[:2]
+        clipped_bboxes = []
+        clipped_labels = []
+        
+        for bbox, label in zip(transformed['bboxes'], transformed['labels']):
+            x_min, y_min, x_max, y_max = bbox[:4]
+            # Clip to valid range
+            x_min = max(0, min(x_min, w - 1))
+            y_min = max(0, min(y_min, h - 1))
+            x_max = max(x_min + 1, min(x_max, w))
+            y_max = max(y_min + 1, min(y_max, h))
+            
+            # Keep bbox if it has valid area
+            if (x_max - x_min) > 1 and (y_max - y_min) > 1:
+                if len(bbox) > 4:
+                    clipped_bboxes.append([x_min, y_min, x_max, y_max] + list(bbox[4:]))
+                else:
+                    clipped_bboxes.append([x_min, y_min, x_max, y_max])
+                clipped_labels.append(label)
+        
+        transformed['bboxes'] = clipped_bboxes
+        transformed['labels'] = clipped_labels
 
         # Convert bbox format if needed
         if self.bbox_format == 'yolo':

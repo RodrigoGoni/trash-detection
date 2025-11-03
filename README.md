@@ -1,12 +1,16 @@
 # Trash Detection - Deep Learning Computer Vision Project
 
-A comprehensive deep learning project for trash detection using computer vision, with integrated MLOps practices for experiment tracking, model versioning, and deployment.
+A comprehensive deep learning project for **object detection of trash** using the TACO dataset, with integrated MLOps practices for experiment tracking, model versioning, and deployment.
 
 ## Project Overview
 
 This project implements a complete pipeline for trash detection using deep learning, including:
-- Multiple model architectures (ResNet, EfficientNet, MobileNet, Vision Transformer)
-- Data preprocessing and augmentation
+- **Object Detection** on TACO (Trash Annotations in Context) dataset
+- **60 categories** of trash items with bounding box annotations
+- **1500 images** with 4784 annotations (split: 70% train, 15% val, 15% test)
+- Advanced preprocessing pipeline with Albumentations (letterboxing, augmentations)
+- Multiple model architectures for object detection
+- Data preprocessing and augmentation specifically for detection tasks
 - Experiment tracking with MLflow
 - Model and data versioning with DVC
 - REST API for model serving
