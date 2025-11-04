@@ -6,19 +6,13 @@ Trains Faster R-CNN model with MLflow tracking and versioning.
 import sys
 import json
 import argparse
-import platform
-import hashlib
-import psutil
 from pathlib import Path
 from datetime import datetime
 
 import yaml
 import torch
-import torch.nn as nn
 import mlflow
-import mlflow.pytorch
 import numpy as np
-import pandas as pd
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -26,6 +20,22 @@ sys.path.append(str(Path(__file__).parent.parent))
 from src.data.taco_dataloader import create_dataloader
 from src.models.detector import TrashDetector
 from src.models.evaluate import ObjectDetectionEvaluator
+from src.training.optimizers import create_optimizer, create_scheduler
+from src.utils.system_info import get_system_info, log_gpu_metrics_to_mlflow
+from src.utils.mlflow_utils import (
+    setup_mlflow,
+    get_dataset_info,
+    log_system_tags,
+    log_experiment_tags,
+    log_dataset_tags,
+    register_dataset_in_mlflow,
+    log_augmentation_tags,
+    log_config_parameters,
+    log_training_tags,
+    log_system_parameters,
+    log_dataset_parameters,
+    register_model_in_mlflow
+)
 
 
 def parse_args():
@@ -49,181 +59,6 @@ def load_config(config_path: str) -> dict:
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     return config
-
-
-def setup_mlflow(config: dict):
-    """Setup MLflow experiment tracking with hierarchical structure."""
-    mlflow.set_tracking_uri(config['mlflow']['tracking_uri'])
-    
-    # Create hierarchical experiment name for better organization
-    # Format: taco-detection/{model_type}/{backbone}/experiments
-    experiment_name = f"taco-detection/{config['model']['name'].lower()}/{config['model']['backbone']}/experiments"
-    mlflow.set_experiment(experiment_name)
-
-
-def get_system_info():
-    """Get comprehensive system information for reproducibility."""
-    info = {
-        # Python & Libraries
-        'python_version': platform.python_version(),
-        'pytorch_version': torch.__version__,
-        'numpy_version': np.__version__,
-        
-        # System
-        'platform': platform.platform(),
-        'hostname': platform.node(),
-        'processor': platform.processor(),
-        
-        # CPU
-        'cpu_count': psutil.cpu_count(logical=False),
-        'cpu_count_logical': psutil.cpu_count(logical=True),
-        
-        # Memory
-        'ram_total_gb': round(psutil.virtual_memory().total / (1024**3), 2),
-        'ram_available_gb': round(psutil.virtual_memory().available / (1024**3), 2),
-        
-        # Disk
-        'disk_total_gb': round(psutil.disk_usage('/').total / (1024**3), 2),
-        'disk_free_gb': round(psutil.disk_usage('/').free / (1024**3), 2),
-        
-        # CUDA
-        'cuda_available': torch.cuda.is_available(),
-    }
-    
-    if torch.cuda.is_available():
-        info['cuda_version'] = torch.version.cuda
-        info['cudnn_version'] = torch.backends.cudnn.version()
-        info['gpu_count'] = torch.cuda.device_count()
-        info['gpu_name'] = torch.cuda.get_device_name(0)
-        
-        # GPU Memory
-        gpu_mem = torch.cuda.get_device_properties(0).total_memory
-        info['gpu_memory_gb'] = round(gpu_mem / (1024**3), 2)
-    
-    return info
-
-
-def get_dataset_info(data_dir: Path):
-    """Get dataset information and generate version hash."""
-    data_dir = Path(data_dir)
-    
-    info = {
-        'path': str(data_dir.resolve()),
-        'exists': data_dir.exists()
-    }
-    
-    if not data_dir.exists():
-        return info
-    
-    # Count files per split
-    for split in ['train', 'val', 'test']:
-        split_dir = data_dir / split / 'images'
-        if split_dir.exists():
-            images = list(split_dir.rglob('*.jpg')) + list(split_dir.rglob('*.png'))
-            info[f'{split}_images'] = len(images)
-            info[f'{split}_size_mb'] = round(
-                sum(img.stat().st_size for img in images) / (1024**2), 2
-            )
-    
-    # Load dataset stats if available
-    stats_file = data_dir / 'dataset_stats.json'
-    if stats_file.exists():
-        with open(stats_file, 'r') as f:
-            stats = json.load(f)
-            info['num_classes'] = stats.get('num_classes', 0)
-            info['total_annotations'] = stats.get('total_annotations', 0)
-    
-    # Generate dataset hash based on annotations files
-    hash_md5 = hashlib.md5()
-    for split in ['train', 'val', 'test']:
-        ann_file = data_dir / split / 'annotations.json'
-        if ann_file.exists():
-            with open(ann_file, 'rb') as f:
-                hash_md5.update(f.read())
-    
-    info['dataset_hash'] = hash_md5.hexdigest()[:12]  # Short hash
-    
-    # Creation time
-    if (data_dir / 'train').exists():
-        info['created_timestamp'] = datetime.fromtimestamp(
-            (data_dir / 'train').stat().st_mtime
-        ).isoformat()
-    
-    return info
-
-
-def log_gpu_metrics(step: int):
-    """Log GPU metrics to MLflow if CUDA is available."""
-    if not torch.cuda.is_available():
-        return
-    
-    try:
-        # GPU memory metrics
-        for i in range(torch.cuda.device_count()):
-            # Memory allocated by PyTorch
-            allocated = torch.cuda.memory_allocated(i) / (1024**3)  # GB
-            reserved = torch.cuda.memory_reserved(i) / (1024**3)    # GB
-            max_allocated = torch.cuda.max_memory_allocated(i) / (1024**3)  # GB
-            
-            mlflow.log_metric(f"gpu_{i}_memory_allocated_gb", allocated, step=step)
-            mlflow.log_metric(f"gpu_{i}_memory_reserved_gb", reserved, step=step)
-            mlflow.log_metric(f"gpu_{i}_memory_max_allocated_gb", max_allocated, step=step)
-            
-            # GPU utilization (if available)
-            try:
-                utilization = torch.cuda.utilization(i)
-                mlflow.log_metric(f"gpu_{i}_utilization_percent", utilization, step=step)
-            except:
-                pass  # Not all CUDA versions support this
-    except Exception as e:
-        # Don't fail training if GPU metrics logging fails
-        pass
-
-
-def log_config_to_mlflow(config: dict):
-    """Log all configuration to MLflow with organized parameters and tags for benchmarking."""
-    mlflow.set_tags({
-        # Model identification
-        "model.type": config['model']['name'].lower(),
-        "model.backbone": config['model']['backbone'],
-        "model.variant": "baseline" if all(v == 0.0 for v in config['data']['augmentation'].values()) else "augmented",
-        
-        # Dataset information
-        "data.version": config['data']['dataset_version'],
-        "data.size": config['data']['img_size'],
-        
-        # Training type
-        "training.hardware": "gpu" if torch.cuda.is_available() else "cpu",
-        "training.batch_size": config['data']['batch_size'],
-        "training.optimizer": config['training']['optimizer']['type'],
-        
-        # Experiment categorization
-        "experiment.type": "benchmark",
-        "experiment.phase": "development"
-    })
-    
-    mlflow.log_params({
-        # Model parameters
-        "model.num_classes": config['model']['num_classes'],
-        "model.pretrained": config['model'].get('pretrained', True),
-        
-        # Training parameters
-        "train.epochs": config['training']['num_epochs'],
-        "train.learning_rate": config['training']['optimizer']['lr'],
-        "train.momentum": config['training']['optimizer']['momentum'],
-        "train.weight_decay": config['training']['optimizer']['weight_decay'],
-        
-        # Scheduler parameters
-        "scheduler.type": config['training']['scheduler']['type'],
-        "scheduler.step_size": config['training']['scheduler']['step_size'],
-        "scheduler.gamma": config['training']['scheduler']['gamma']
-    })
-    
-    # Log preprocessing configuration as a single parameter (for reference)
-    mlflow.log_param("preprocessing_config", config['data']['preprocessing'])
-    
-    # Log augmentation configuration as a single parameter
-    mlflow.log_param("augmentation_config", config['data']['augmentation'])
 
 
 def train_one_epoch(model, dataloader, optimizer, device, epoch, scaler=None, grad_clip_norm=None):
@@ -422,77 +257,17 @@ def main():
         backbone=config['model']['backbone']
     ).to(device)
     
-    # Create optimizer (support SGD, Adam, AdamW)
-    optimizer_type = config['training']['optimizer']['type'].lower()
+    # Create optimizer using factory function
+    print(f"Creating optimizer: {config['training']['optimizer']['type'].upper()}")
+    optimizer = create_optimizer(model.parameters(), config['training']['optimizer'])
     
-    if optimizer_type == 'sgd':
-        optimizer = torch.optim.SGD(
-            model.parameters(),
-            lr=config['training']['optimizer']['lr'],
-            momentum=config['training']['optimizer'].get('momentum', 0.9),
-            weight_decay=config['training']['optimizer'].get('weight_decay', 0.0005)
-        )
-    elif optimizer_type == 'adam':
-        optimizer = torch.optim.Adam(
-            model.parameters(),
-            lr=config['training']['optimizer']['lr'],
-            betas=config['training']['optimizer'].get('betas', [0.9, 0.999]),
-            weight_decay=config['training']['optimizer'].get('weight_decay', 0.0001),
-            eps=config['training']['optimizer'].get('eps', 1e-8)
-        )
-    elif optimizer_type == 'adamw':
-        optimizer = torch.optim.AdamW(
-            model.parameters(),
-            lr=config['training']['optimizer']['lr'],
-            betas=config['training']['optimizer'].get('betas', [0.9, 0.999]),
-            weight_decay=config['training']['optimizer'].get('weight_decay', 0.01),
-            eps=config['training']['optimizer'].get('eps', 1e-8)
-        )
-    else:
-        raise ValueError(f"Unsupported optimizer type: {optimizer_type}")
-    
-    print(f"Using optimizer: {optimizer_type.upper()}")
-    
-    # Create scheduler (support StepLR, CosineAnnealing, CosineAnnealingWarmup)
-    scheduler_type = config['training']['scheduler']['type'].lower()
-    
-    if scheduler_type == 'step_lr':
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer,
-            step_size=config['training']['scheduler']['step_size'],
-            gamma=config['training']['scheduler']['gamma']
-        )
-        warmup_scheduler = None
-    elif scheduler_type == 'cosine_annealing':
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=config['training']['num_epochs'],
-            eta_min=config['training']['scheduler'].get('min_lr', 1e-6)
-        )
-        warmup_scheduler = None
-    elif scheduler_type == 'cosine_annealing_warmup':
-        warmup_epochs = config['training']['scheduler'].get('warmup_epochs', 5)
-        main_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=config['training']['num_epochs'] - warmup_epochs,
-            eta_min=config['training']['scheduler'].get('min_lr', 1e-6)
-        )
-        # Linear warmup
-        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
-            optimizer,
-            start_factor=0.1,
-            end_factor=1.0,
-            total_iters=warmup_epochs
-        )
-        scheduler = torch.optim.lr_scheduler.SequentialLR(
-            optimizer,
-            schedulers=[warmup_scheduler, main_scheduler],
-            milestones=[warmup_epochs]
-        )
-    else:
-        raise ValueError(f"Unsupported scheduler type: {scheduler_type}")
-    
-    print(f"Using scheduler: {scheduler_type}")
+    # Create scheduler using factory function
+    print(f"Creating scheduler: {config['training']['scheduler']['type']}")
+    scheduler = create_scheduler(
+        optimizer, 
+        config['training']['scheduler'], 
+        config['training']['num_epochs']
+    )
     
     # Setup mixed precision training (AMP)
     use_amp = config['training'].get('use_amp', False)
@@ -522,79 +297,25 @@ def main():
         mlflow.enable_system_metrics_logging()
         
         # ========================================
-        # SYSTEM TAGS
+        # LOG ALL TAGS (System, Experiment, Dataset, Training, Augmentation)
         # ========================================
-        mlflow.set_tag("system.hostname", system_info['hostname'])
-        mlflow.set_tag("system.platform", system_info['platform'])
-        mlflow.set_tag("system.python_version", system_info['python_version'])
-        mlflow.set_tag("system.pytorch_version", system_info['pytorch_version'])
-        mlflow.set_tag("system.cuda_available", system_info['cuda_available'])
+        log_system_tags(system_info)
+        log_experiment_tags(config)
+        log_training_tags(config)
         
-        if system_info['cuda_available']:
-            mlflow.set_tag("system.gpu_name", system_info['gpu_name'])
-            mlflow.set_tag("system.cuda_version", system_info['cuda_version'])
-            mlflow.set_tag("system.gpu_memory_gb", system_info['gpu_memory_gb'])
+        # Register dataset in MLflow and log tags
+        log_dataset_tags(dataset_info, dataset_version)
+        register_dataset_in_mlflow(dataset_info, dataset_version, config)
         
-        # ========================================
-        # EXPERIMENT TAGS (from config)
-        # ========================================
-        if 'tags' in config['experiment']:
-            for tag in config['experiment']['tags']:
-                mlflow.set_tag(f"experiment.{tag}", "true")
-        
-        if 'description' in config['experiment']:
-            mlflow.set_tag("mlflow.note.content", config['experiment']['description'])
-        
-        # ========================================
-        # DATASET TAGS & REGISTRATION
-        # ========================================
-        mlflow.set_tag("dataset.version", dataset_version)
-        mlflow.set_tag("dataset.hash", dataset_info.get('dataset_hash', 'unknown'))
-        mlflow.set_tag("dataset.path", dataset_info['path'])
-        
-        if 'train_images' in dataset_info:
-            mlflow.set_tag("dataset.train_images", dataset_info['train_images'])
-            mlflow.set_tag("dataset.val_images", dataset_info['val_images'])
-            mlflow.set_tag("dataset.test_images", dataset_info['test_images'])
-        
-        # Register dataset in MLflow (appears in Datasets tab)
-        dataset_source = mlflow.data.from_pandas(
-            pd.DataFrame([{
-                'name': 'TACO-trash-detection',
-                'version': dataset_version,
-                'hash': dataset_info.get('dataset_hash', 'unknown'),
-                'train_images': dataset_info.get('train_images', 0),
-                'val_images': dataset_info.get('val_images', 0),
-                'test_images': dataset_info.get('test_images', 0),
-                'num_classes': dataset_info.get('num_classes', config['model']['num_classes']),
-                'total_annotations': dataset_info.get('total_annotations', 0),
-                'path': dataset_info['path']
-            }]),
-            source=dataset_info['path'],
-            name="TACO-dataset"
-        )
-        mlflow.log_input(dataset_source, context="training")
-        
+        # Log augmentation tags
         aug_config = config['data']['augmentation']
-        enabled_augs = [k for k, v in aug_config.items() if k.endswith('_p') and v > 0]
-        if enabled_augs:
-            mlflow.set_tag("augmentation.enabled", ", ".join(enabled_augs))
-            mlflow.set_tag("augmentation.status", "enabled")
-        else:
-            mlflow.set_tag("augmentation.status", "disabled")
+        enabled_augs = log_augmentation_tags(aug_config)
         
 
         # Log configuration
-        log_config_to_mlflow(config)
-        
-        # Log system info as params
-        for key, value in system_info.items():
-            mlflow.log_param(f"sys_{key}", value)
-        
-        # Log dataset info as params
-        for key, value in dataset_info.items():
-            if key not in ['path']:  # path is already in tags
-                mlflow.log_param(f"data_{key}", value)
+        log_config_parameters(config)
+        log_system_parameters(system_info)
+        log_dataset_parameters(dataset_info)
         
         # Log dataset statistics
         dataset_stats_path = Path(config['data']['processed_dir']) / 'dataset_stats.json'
@@ -654,7 +375,7 @@ def main():
             mlflow.log_metric("learning_rate", optimizer.param_groups[0]['lr'], step=epoch)
             
             # Log GPU metrics
-            log_gpu_metrics(step=epoch)
+            log_gpu_metrics_to_mlflow(step=epoch)
             
             # Evaluate with detection metrics based on val_frequency
             val_frequency = config['training'].get('val_frequency', 1)
@@ -784,90 +505,20 @@ def main():
         print("Registering model in MLflow Model Registry...")
         print(f"{'='*60}")
         
-        # Log the model (will auto-register if registered_model_name is provided)
-        model_name = f"taco-{config['model']['name'].lower()}-{config['model']['backbone']}"
-        
-        # Log model to MLflow
-        model_info = mlflow.pytorch.log_model(
-            pytorch_model=model,
-            artifact_path="model",
-            registered_model_name=model_name,
+        # Register model in MLflow using utility function
+        version = register_model_in_mlflow(
+            model=model,
+            config=config,
+            test_metrics=test_metrics,
+            dataset_version=dataset_version,
+            dataset_info=dataset_info,
+            enabled_augs=enabled_augs,
+            epoch=epoch,
+            use_amp=use_amp
         )
         
-        # Get model version tags
-        client = mlflow.tracking.MlflowClient()
-        
-        # Get all versions and find the latest one (modern API)
-        model_versions = client.search_model_versions(f"name='{model_name}'")
-        if model_versions:
-            # Sort by version number and get the latest
-            latest_version = sorted(model_versions, key=lambda x: int(x.version), reverse=True)[0]
-            version = latest_version.version
-            
-            # Set version tags
-            client.set_model_version_tag(
-                name=model_name,
-                version=version,
-                key="dataset_version",
-                value=dataset_version
-            )
-            client.set_model_version_tag(
-                name=model_name,
-                version=version,
-                key="dataset_hash",
-                value=dataset_info.get('dataset_hash', 'unknown')
-            )
-            client.set_model_version_tag(
-                name=model_name,
-                version=version,
-                key="test_mAP",
-                value=f"{test_metrics['mAP']:.4f}"
-            )
-            client.set_model_version_tag(
-                name=model_name,
-                version=version,
-                key="test_precision",
-                value=f"{test_metrics['precision']:.4f}"
-            )
-            client.set_model_version_tag(
-                name=model_name,
-                version=version,
-                key="test_recall",
-                value=f"{test_metrics['recall']:.4f}"
-            )
-            client.set_model_version_tag(
-                name=model_name,
-                version=version,
-                key="augmentation_status",
-                value="disabled" if not enabled_augs else "enabled"
-            )
-            client.set_model_version_tag(
-                name=model_name,
-                version=version,
-                key="optimizer",
-                value=config['training']['optimizer']['type']
-            )
-            client.set_model_version_tag(
-                name=model_name,
-                version=version,
-                key="scheduler",
-                value=config['training']['scheduler']['type']
-            )
-            
-            # Set model version description
-            client.update_model_version(
-                name=model_name,
-                version=version,
-                description=f"Faster R-CNN {config['model']['backbone']} trained on TACO dataset "
-                           f"(v{dataset_version}). "
-                           f"Optimizer: {config['training']['optimizer']['type'].upper()}, "
-                           f"Scheduler: {config['training']['scheduler']['type']}. "
-                           f"Test mAP@0.5: {test_metrics['mAP']:.4f}, "
-                           f"Precision: {test_metrics['precision']:.4f}, "
-                           f"Recall: {test_metrics['recall']:.4f}. "
-                           f"Trained for {epoch} epochs with {'AMP' if use_amp else 'FP32'}."
-            )
-            
+        if version:
+            model_name = f"taco-{config['model']['name'].lower()}-{config['model']['backbone']}"
             print(f"✓ Model registered: {model_name} (version {version})")
             print(f"  Test mAP@0.5: {test_metrics['mAP']:.4f}")
             print(f"  Precision: {test_metrics['precision']:.4f}")
@@ -875,8 +526,6 @@ def main():
             print(f"  Dataset: {dataset_version} (hash: {dataset_info.get('dataset_hash', 'unknown')})")
             print(f"  Optimizer: {config['training']['optimizer']['type'].upper()}")
             print(f"  Scheduler: {config['training']['scheduler']['type']}")
-            print(f"  Test mAP@0.5: {test_metrics['mAP']:.4f}")
-            print(f"  Dataset: {dataset_version} (hash: {dataset_info.get('dataset_hash', 'unknown')})")
         
         print(f"{'='*60}")
         

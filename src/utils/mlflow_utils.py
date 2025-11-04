@@ -1,117 +1,354 @@
 """
-MLflow experiment tracking utilities
+MLflow utilities for experiment tracking and model registry.
+Provides functions to setup MLflow, log configurations, and manage datasets.
 """
 
+import json
+import hashlib
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any, Optional
+
+import torch
 import mlflow
 import mlflow.pytorch
-from pathlib import Path
-from typing import Dict, Any, Optional
-import yaml
-import torch.nn as nn
+import pandas as pd
 
 
-class MLflowTracker:
+def setup_mlflow(config: dict):
     """
-    MLflow experiment tracking wrapper
-
+    Setup MLflow experiment tracking with hierarchical structure.
+    
     Args:
-        tracking_uri: MLflow tracking server URI
-        experiment_name: Name of the experiment
-        run_name: Name of the run (optional)
+        config: Configuration dictionary with MLflow settings
     """
-
-    def __init__(
-        self,
-        tracking_uri: str = "http://localhost:5000",
-        experiment_name: str = "trash-detection",
-        run_name: Optional[str] = None
-    ):
-        # Set tracking URI
-        mlflow.set_tracking_uri(tracking_uri)
-
-        # Set or create experiment
-        mlflow.set_experiment(experiment_name)
-
-        self.experiment_name = experiment_name
-        self.run_name = run_name
-        self.run = None
-
-    def start_run(self, run_name: Optional[str] = None):
-        """Start a new MLflow run"""
-        self.run = mlflow.start_run(run_name=run_name or self.run_name)
-        return self.run
-
-    def end_run(self):
-        """End the current MLflow run"""
-        mlflow.end_run()
-
-    def log_params(self, params: Dict[str, Any]):
-        """Log parameters"""
-        mlflow.log_params(params)
-
-    def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None):
-        """Log metrics"""
-        mlflow.log_metrics(metrics, step=step)
-
-    def log_metric(self, key: str, value: float, step: Optional[int] = None):
-        """Log a single metric"""
-        mlflow.log_metric(key, value, step=step)
-
-    def log_artifact(self, local_path: str):
-        """Log an artifact (file)"""
-        mlflow.log_artifact(local_path)
-
-    def log_artifacts(self, local_dir: str):
-        """Log artifacts from a directory"""
-        mlflow.log_artifacts(local_dir)
-
-    def log_model(self, model: nn.Module, artifact_path: str = "model"):
-        """Log PyTorch model"""
-        mlflow.pytorch.log_model(model, artifact_path)
-
-    def log_config(self, config: Dict[str, Any], filename: str = "config.yaml"):
-        """Log configuration file"""
-        config_path = Path(filename)
-        with open(config_path, 'w') as f:
-            yaml.dump(config, f)
-
-        mlflow.log_artifact(str(config_path))
-        config_path.unlink()  # Remove temp file
-
-    def set_tags(self, tags: Dict[str, str]):
-        """Set tags for the run"""
-        mlflow.set_tags(tags)
-
-    def log_figure(self, figure, artifact_file: str):
-        """Log matplotlib figure"""
-        figure.savefig(artifact_file)
-        mlflow.log_artifact(artifact_file)
-        Path(artifact_file).unlink()  # Remove temp file
-
-    @staticmethod
-    def load_model(model_uri: str):
-        """Load a model from MLflow"""
-        return mlflow.pytorch.load_model(model_uri)
+    mlflow.set_tracking_uri(config['mlflow']['tracking_uri'])
+    
+    # Create hierarchical experiment name for better organization
+    # Format: taco-detection/{model_type}/{backbone}/experiments
+    experiment_name = (
+        f"taco-detection/{config['model']['name'].lower()}/"
+        f"{config['model']['backbone']}/experiments"
+    )
+    mlflow.set_experiment(experiment_name)
 
 
-def setup_mlflow_tracking(config: Dict[str, Any]) -> MLflowTracker:
+def get_dataset_info(data_dir: Path) -> dict:
     """
-    Setup MLflow tracking from config
+    Get dataset information and generate version hash.
+    
+    Args:
+        data_dir: Path to the dataset directory
+        
+    Returns:
+        Dictionary with dataset information including paths, counts, and hash
+    """
+    data_dir = Path(data_dir)
+    
+    info = {
+        'path': str(data_dir.resolve()),
+        'exists': data_dir.exists()
+    }
+    
+    if not data_dir.exists():
+        return info
+    
+    # Count files per split
+    for split in ['train', 'val', 'test']:
+        split_dir = data_dir / split / 'images'
+        if split_dir.exists():
+            images = list(split_dir.rglob('*.jpg')) + list(split_dir.rglob('*.png'))
+            info[f'{split}_images'] = len(images)
+            info[f'{split}_size_mb'] = round(
+                sum(img.stat().st_size for img in images) / (1024**2), 2
+            )
+    
+    # Load dataset stats if available
+    stats_file = data_dir / 'dataset_stats.json'
+    if stats_file.exists():
+        with open(stats_file, 'r') as f:
+            stats = json.load(f)
+            info['num_classes'] = stats.get('num_classes', 0)
+            info['total_annotations'] = stats.get('total_annotations', 0)
+    
+    # Generate dataset hash based on annotations files
+    hash_md5 = hashlib.md5()
+    for split in ['train', 'val', 'test']:
+        ann_file = data_dir / split / 'annotations.json'
+        if ann_file.exists():
+            with open(ann_file, 'rb') as f:
+                hash_md5.update(f.read())
+    
+    info['dataset_hash'] = hash_md5.hexdigest()[:12]  # Short hash
+    
+    # Creation time
+    if (data_dir / 'train').exists():
+        info['created_timestamp'] = datetime.fromtimestamp(
+            (data_dir / 'train').stat().st_mtime
+        ).isoformat()
+    
+    return info
 
+
+def log_system_tags(system_info: dict):
+    """
+    Log system information as MLflow tags.
+    
+    Args:
+        system_info: Dictionary with system information
+    """
+    mlflow.set_tag("system.hostname", system_info['hostname'])
+    mlflow.set_tag("system.platform", system_info['platform'])
+    mlflow.set_tag("system.python_version", system_info['python_version'])
+    mlflow.set_tag("system.pytorch_version", system_info['pytorch_version'])
+    mlflow.set_tag("system.cuda_available", system_info['cuda_available'])
+    
+    if system_info['cuda_available']:
+        mlflow.set_tag("system.gpu_name", system_info['gpu_name'])
+        mlflow.set_tag("system.cuda_version", system_info['cuda_version'])
+        mlflow.set_tag("system.gpu_memory_gb", system_info['gpu_memory_gb'])
+
+
+def log_experiment_tags(config: dict):
+    """
+    Log experiment-specific tags from configuration.
+    
+    Args:
+        config: Configuration dictionary with experiment settings
+    """
+    if 'tags' in config.get('experiment', {}):
+        for tag in config['experiment']['tags']:
+            mlflow.set_tag(f"experiment.{tag}", "true")
+    
+    if 'description' in config.get('experiment', {}):
+        mlflow.set_tag("mlflow.note.content", config['experiment']['description'])
+
+
+def log_dataset_tags(dataset_info: dict, dataset_version: str):
+    """
+    Log dataset information as MLflow tags.
+    
+    Args:
+        dataset_info: Dictionary with dataset information
+        dataset_version: Dataset version string
+    """
+    mlflow.set_tag("dataset.version", dataset_version)
+    mlflow.set_tag("dataset.hash", dataset_info.get('dataset_hash', 'unknown'))
+    mlflow.set_tag("dataset.path", dataset_info['path'])
+    
+    if 'train_images' in dataset_info:
+        mlflow.set_tag("dataset.train_images", dataset_info['train_images'])
+        mlflow.set_tag("dataset.val_images", dataset_info['val_images'])
+        mlflow.set_tag("dataset.test_images", dataset_info['test_images'])
+
+
+def register_dataset_in_mlflow(dataset_info: dict, dataset_version: str, config: dict):
+    """
+    Register dataset in MLflow (appears in Datasets tab).
+    
+    Args:
+        dataset_info: Dictionary with dataset information
+        dataset_version: Dataset version string
+        config: Configuration dictionary
+    """
+    dataset_source = mlflow.data.from_pandas(
+        pd.DataFrame([{
+            'name': 'TACO-trash-detection',
+            'version': dataset_version,
+            'hash': dataset_info.get('dataset_hash', 'unknown'),
+            'train_images': dataset_info.get('train_images', 0),
+            'val_images': dataset_info.get('val_images', 0),
+            'test_images': dataset_info.get('test_images', 0),
+            'num_classes': dataset_info.get('num_classes', config['model']['num_classes']),
+            'total_annotations': dataset_info.get('total_annotations', 0),
+            'path': dataset_info['path']
+        }]),
+        source=dataset_info['path'],
+        name="TACO-dataset"
+    )
+    mlflow.log_input(dataset_source, context="training")
+
+
+def log_augmentation_tags(augmentation_config: dict):
+    """
+    Log augmentation configuration as tags.
+    
+    Args:
+        augmentation_config: Dictionary with augmentation settings
+        
+    Returns:
+        List of enabled augmentations
+    """
+    enabled_augs = [k for k, v in augmentation_config.items() if k.endswith('_p') and v > 0]
+    
+    if enabled_augs:
+        mlflow.set_tag("augmentation.enabled", ", ".join(enabled_augs))
+        mlflow.set_tag("augmentation.status", "enabled")
+    else:
+        mlflow.set_tag("augmentation.status", "disabled")
+    
+    return enabled_augs
+
+
+def log_config_parameters(config: dict):
+    """
+    Log training configuration as MLflow parameters.
+    
     Args:
         config: Configuration dictionary
-
-    Returns:
-        MLflowTracker instance
     """
-    mlflow_config = config.get('mlflow', {})
+    # Model parameters
+    mlflow.log_params({
+        "model.num_classes": config['model']['num_classes'],
+        "model.pretrained": config['model'].get('pretrained', True),
+    })
+    
+    # Training parameters
+    mlflow.log_params({
+        "train.epochs": config['training']['num_epochs'],
+        "train.learning_rate": config['training']['optimizer']['lr'],
+        "train.momentum": config['training']['optimizer'].get('momentum', 0.9),
+        "train.weight_decay": config['training']['optimizer'].get('weight_decay', 0.0005),
+    })
+    
+    # Scheduler parameters
+    mlflow.log_params({
+        "scheduler.type": config['training']['scheduler']['type'],
+        "scheduler.step_size": config['training']['scheduler'].get('step_size', 0),
+        "scheduler.gamma": config['training']['scheduler'].get('gamma', 0),
+    })
+    
+    # Log preprocessing and augmentation as single parameters
+    mlflow.log_param("preprocessing_config", str(config['data']['preprocessing']))
+    mlflow.log_param("augmentation_config", str(config['data']['augmentation']))
 
-    tracker = MLflowTracker(
-        tracking_uri=mlflow_config.get(
-            'tracking_uri', 'http://localhost:5000'),
-        experiment_name=mlflow_config.get(
-            'experiment_name', 'trash-detection'),
-        run_name=mlflow_config.get('run_name', None)
+
+def log_training_tags(config: dict):
+    """
+    Log training-related tags for benchmarking.
+    
+    Args:
+        config: Configuration dictionary
+    """
+    mlflow.set_tags({
+        # Model identification
+        "model.type": config['model']['name'].lower(),
+        "model.backbone": config['model']['backbone'],
+        "model.variant": "baseline" if all(
+            v == 0.0 for v in config['data']['augmentation'].values()
+        ) else "augmented",
+        
+        # Dataset information
+        "data.version": config['data'].get('dataset_version', 'unknown'),
+        "data.size": config['data']['img_size'],
+        
+        # Training type
+        "training.hardware": "gpu" if torch.cuda.is_available() else "cpu",
+        "training.batch_size": config['data']['batch_size'],
+        "training.optimizer": config['training']['optimizer']['type'],
+        
+        # Experiment categorization
+        "experiment.type": "benchmark",
+        "experiment.phase": "development"
+    })
+
+
+def log_system_parameters(system_info: dict):
+    """
+    Log system information as MLflow parameters.
+    
+    Args:
+        system_info: Dictionary with system information
+    """
+    for key, value in system_info.items():
+        mlflow.log_param(f"sys_{key}", value)
+
+
+def log_dataset_parameters(dataset_info: dict):
+    """
+    Log dataset information as MLflow parameters.
+    
+    Args:
+        dataset_info: Dictionary with dataset information
+    """
+    for key, value in dataset_info.items():
+        if key not in ['path']:  # path is already in tags
+            mlflow.log_param(f"data_{key}", value)
+
+
+def register_model_in_mlflow(model, config: dict, test_metrics: dict, 
+                             dataset_version: str, dataset_info: dict,
+                             enabled_augs: list, epoch: int, use_amp: bool) -> str:
+    """
+    Register trained model in MLflow Model Registry.
+    
+    Args:
+        model: Trained PyTorch model
+        config: Configuration dictionary
+        test_metrics: Dictionary with test set metrics
+        dataset_version: Dataset version string
+        dataset_info: Dictionary with dataset information
+        enabled_augs: List of enabled augmentations
+        epoch: Final training epoch
+        use_amp: Whether AMP was used
+        
+    Returns:
+        Model version number as string
+    """
+    model_name = f"taco-{config['model']['name'].lower()}-{config['model']['backbone']}"
+    
+    # Log model to MLflow
+    mlflow.pytorch.log_model(
+        pytorch_model=model,
+        artifact_path="model",
+        registered_model_name=model_name,
     )
-
-    return tracker
+    
+    # Get model version and set tags
+    client = mlflow.tracking.MlflowClient()
+    model_versions = client.search_model_versions(f"name='{model_name}'")
+    
+    if not model_versions:
+        return None
+    
+    # Sort by version number and get the latest
+    latest_version = sorted(model_versions, key=lambda x: int(x.version), reverse=True)[0]
+    version = latest_version.version
+    
+    # Set version tags
+    version_tags = {
+        "dataset_version": dataset_version,
+        "dataset_hash": dataset_info.get('dataset_hash', 'unknown'),
+        "test_mAP": f"{test_metrics['mAP']:.4f}",
+        "test_precision": f"{test_metrics['precision']:.4f}",
+        "test_recall": f"{test_metrics['recall']:.4f}",
+        "augmentation_status": "disabled" if not enabled_augs else "enabled",
+        "optimizer": config['training']['optimizer']['type'],
+        "scheduler": config['training']['scheduler']['type'],
+    }
+    
+    for key, value in version_tags.items():
+        client.set_model_version_tag(
+            name=model_name,
+            version=version,
+            key=key,
+            value=str(value)
+        )
+    
+    # Set model version description
+    client.update_model_version(
+        name=model_name,
+        version=version,
+        description=(
+            f"Faster R-CNN {config['model']['backbone']} trained on TACO dataset "
+            f"(v{dataset_version}). "
+            f"Optimizer: {config['training']['optimizer']['type'].upper()}, "
+            f"Scheduler: {config['training']['scheduler']['type']}. "
+            f"Test mAP@0.5: {test_metrics['mAP']:.4f}, "
+            f"Precision: {test_metrics['precision']:.4f}, "
+            f"Recall: {test_metrics['recall']:.4f}. "
+            f"Trained for {epoch} epochs with {'AMP' if use_amp else 'FP32'}."
+        )
+    )
+    
+    return version
