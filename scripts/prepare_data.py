@@ -1,15 +1,20 @@
 """
 Prepare TACO dataset for object detection training.
 
-Splits COCO-format dataset into train/val/test sets while maintaining annotation integrity.
+Splits COCO-format dataset into train/val/test sets while maintaining annotation integrity
+and handling class imbalance through stratified splitting.
 """
 
 import argparse
 import shutil
 import json
+import cv2
+import numpy as np
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict, Counter
 from sklearn.model_selection import train_test_split
+from typing import Dict, List, Tuple, Set
+from datetime import datetime
 
 
 def parse_args():
@@ -20,6 +25,10 @@ def parse_args():
                        help='Path to raw TACO data directory')
     parser.add_argument('--processed-dir', type=str, default='data/processed',
                        help='Path to output directory')
+    parser.add_argument('--version', type=str, default=None,
+                       help='Dataset version name (default: auto-generated timestamp)')
+    parser.add_argument('--overwrite', action='store_true', default=False,
+                       help='Overwrite existing processed dataset (otherwise creates versioned folder)')
     parser.add_argument('--val-split', type=float, default=0.15,
                        help='Validation split ratio')
     parser.add_argument('--test-split', type=float, default=0.15,
@@ -28,6 +37,14 @@ def parse_args():
                        help='Random seed')
     parser.add_argument('--min-annotations', type=int, default=1,
                        help='Minimum annotations per image')
+    parser.add_argument('--stratify', action='store_true', default=True,
+                       help='Use stratified split based on minority classes')
+    parser.add_argument('--duplicate-multi-label', action='store_true', default=False,
+                       help='Duplicate multi-label images with bbox occlusion for minority classes')
+    parser.add_argument('--iou-threshold', type=float, default=0.3,
+                       help='IoU threshold for deciding bbox occlusion (default: 0.3)')
+    parser.add_argument('--minority-threshold', type=int, default=50,
+                       help='Classes with fewer annotations are considered minority (default: 50)')
     return parser.parse_args()
 
 
@@ -54,12 +71,161 @@ def filter_images_by_annotations(data: dict, min_annotations: int = 1) -> tuple:
     return valid_ids, filtered
 
 
-def split_dataset(images: list, val_split: float, test_split: float, seed: int) -> tuple:
-    """Split images into train/val/test sets."""
-    train_val, test_images = train_test_split(images, test_size=test_split, random_state=seed)
+def analyze_class_distribution(data: dict) -> Dict:
+    """Analyze class distribution and identify minority classes."""
+    class_counts = Counter(ann['category_id'] for ann in data['annotations'])
+    
+    # Map category ID to name
+    cat_id_to_name = {cat['id']: cat['name'] for cat in data['categories']}
+    
+    print("\n" + "="*60)
+    print("CLASS DISTRIBUTION ANALYSIS")
+    print("="*60)
+    
+    sorted_classes = sorted(class_counts.items(), key=lambda x: x[1])
+    
+    for cat_id, count in sorted_classes:
+        print(f"  {cat_id_to_name[cat_id]:30s}: {count:4d} annotations")
+    
+    return {
+        'class_counts': class_counts,
+        'cat_id_to_name': cat_id_to_name,
+        'total_annotations': len(data['annotations'])
+    }
+
+
+def identify_minority_classes(class_counts: Counter, threshold: int) -> Set[int]:
+    """Identify minority classes below threshold."""
+    minority = {cat_id for cat_id, count in class_counts.items() if count < threshold}
+    return minority
+
+
+def analyze_multi_label_images(data: dict, minority_classes: Set[int]) -> Dict:
+    """Analyze images with multiple labels, especially with minority classes."""
+    img_to_cats = defaultdict(set)
+    img_to_anns = defaultdict(list)
+    
+    for ann in data['annotations']:
+        img_to_cats[ann['image_id']].add(ann['category_id'])
+        img_to_anns[ann['image_id']].append(ann)
+    
+    # Stats
+    multi_label_images = {img_id: cats for img_id, cats in img_to_cats.items() if len(cats) > 1}
+    multi_with_minority = {img_id: cats for img_id, cats in multi_label_images.items() 
+                           if any(cat in minority_classes for cat in cats)}
+    
+    print("\n" + "="*60)
+    print("MULTI-LABEL IMAGE ANALYSIS")
+    print("="*60)
+    print(f"  Total images: {len(img_to_cats)}")
+    print(f"  Single-label images: {len(img_to_cats) - len(multi_label_images)}")
+    print(f"  Multi-label images: {len(multi_label_images)}")
+    print(f"  Multi-label with minority class: {len(multi_with_minority)}")
+    
+    return {
+        'img_to_cats': dict(img_to_cats),
+        'img_to_anns': dict(img_to_anns),
+        'multi_label_images': multi_label_images,
+        'multi_with_minority': multi_with_minority
+    }
+
+
+def calculate_iou(box1: List[float], box2: List[float]) -> float:
+    """Calculate IoU between two bboxes in [x, y, w, h] format."""
+    x1, y1, w1, h1 = box1
+    x2, y2, w2, h2 = box2
+    
+    # Convert to [x1, y1, x2, y2]
+    box1_x2, box1_y2 = x1 + w1, y1 + h1
+    box2_x2, box2_y2 = x2 + w2, y2 + h2
+    
+    # Intersection
+    inter_x1 = max(x1, x2)
+    inter_y1 = max(y1, y2)
+    inter_x2 = min(box1_x2, box2_x2)
+    inter_y2 = min(box1_y2, box2_y2)
+    
+    if inter_x2 < inter_x1 or inter_y2 < inter_y1:
+        return 0.0
+    
+    inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+    box1_area = w1 * h1
+    box2_area = w2 * h2
+    union_area = box1_area + box2_area - inter_area
+    
+    return inter_area / union_area if union_area > 0 else 0.0
+
+
+def get_primary_class_for_image(img_id: int, img_to_anns: Dict, 
+                                minority_classes: Set[int]) -> int:
+    """
+    Get primary class for stratification.
+    Priority: minority class > most frequent class in image.
+    """
+    anns = img_to_anns.get(img_id, [])
+    if not anns:
+        return -1
+    
+    # Check if image has minority class
+    minority_in_img = [ann['category_id'] for ann in anns 
+                      if ann['category_id'] in minority_classes]
+    
+    if minority_in_img:
+        # Return the minority class with fewest overall examples
+        return min(minority_in_img)
+    
+    # Otherwise return most frequent class in this image
+    class_counts = Counter(ann['category_id'] for ann in anns)
+    return class_counts.most_common(1)[0][0]
+
+
+def stratified_split(images: List[dict], img_to_anns: Dict, minority_classes: Set[int],
+                    val_split: float, test_split: float, seed: int) -> Tuple:
+    """
+    Stratified split prioritizing minority classes.
+    """
+    print("\n" + "="*60)
+    print("PERFORMING STRATIFIED SPLIT")
+    print("="*60)
+    
+    # Assign primary class to each image
+    image_classes = []
+    for img in images:
+        primary_class = get_primary_class_for_image(img['id'], img_to_anns, minority_classes)
+        image_classes.append(primary_class)
+    
+    print(f"  Images with minority as primary: {sum(1 for c in image_classes if c in minority_classes)}")
+    
+    # First split: train+val vs test (stratified)
+    try:
+        train_val, test_images, train_val_classes, _ = train_test_split(
+            images, image_classes,
+            test_size=test_split,
+            stratify=image_classes,
+            random_state=seed
+        )
+    except ValueError as e:
+        print(f"  Warning: Stratification failed ({e}), using random split for test")
+        train_val, test_images = train_test_split(images, test_size=test_split, random_state=seed)
+        train_val_classes = [get_primary_class_for_image(img['id'], img_to_anns, minority_classes) 
+                            for img in train_val]
+    
+    # Second split: train vs val (stratified)
     val_size_adjusted = val_split / (1 - test_split)
-    train_images, val_images = train_test_split(train_val, test_size=val_size_adjusted, 
-                                                 random_state=seed)
+    try:
+        train_images, val_images, _, _ = train_test_split(
+            train_val, train_val_classes,
+            test_size=val_size_adjusted,
+            stratify=train_val_classes,
+            random_state=seed
+        )
+    except ValueError as e:
+        print(f"  Warning: Stratification failed ({e}), using random split for val")
+        train_images, val_images = train_test_split(train_val, test_size=val_size_adjusted, 
+                                                    random_state=seed)
+    
+    print(f"  Split complete: Train={len(train_images)}, Val={len(val_images)}, Test={len(test_images)}")
+    
     return train_images, val_images, test_images
 
 
@@ -149,13 +315,63 @@ def compute_statistics(data: dict, train_data: dict, val_data: dict, test_data: 
 
 
 def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float, 
-                   test_split: float, seed: int, min_annotations: int = 1):
-    """Prepare TACO dataset by splitting into train/val/test sets."""
+                   test_split: float, seed: int, min_annotations: int = 1,
+                   stratify: bool = True, minority_threshold: int = 50,
+                   duplicate_multi_label: bool = False, iou_threshold: float = 0.3,
+                   version: str = None, overwrite: bool = False):
+    """Prepare TACO dataset by splitting into train/val/test sets with stratification."""
     raw_path = Path(raw_dir)
-    processed_path = Path(processed_dir)
+    
+    # Handle versioning
+    if overwrite:
+        processed_path = Path(processed_dir)
+        print(f"OVERWRITE MODE: Will overwrite existing data in {processed_path}")
+    else:
+        # Create versioned output directory
+        if version is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            version = f"v_{timestamp}"
+        
+        base_dir = Path(processed_dir).parent
+        processed_path = base_dir / f"processed_{version}"
+        
+        if processed_path.exists():
+            print(f"WARNING: Version directory already exists: {processed_path}")
+            response = input("Continue and overwrite? (y/n): ")
+            if response.lower() != 'y':
+                print("Aborted.")
+                return
+        
+        print(f"Creating versioned dataset: {processed_path}")
+    
+    # Create symlink to 'processed' pointing to latest version (only if not overwrite)
+    if not overwrite:
+        symlink_path = Path(processed_dir)
+        if symlink_path.is_symlink() or symlink_path.is_dir():
+            # Backup old symlink/dir
+            if symlink_path.is_symlink():
+                old_target = symlink_path.resolve()
+                print(f"Previous version was: {old_target}")
+                symlink_path.unlink()
+            elif symlink_path.is_dir() and not symlink_path.is_symlink():
+                # Rename existing directory
+                backup_name = f"processed_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                backup_path = symlink_path.parent / backup_name
+                print(f"Backing up existing processed/ to {backup_name}")
+                symlink_path.rename(backup_path)
+        
+        # Create new symlink
+        try:
+            symlink_path.symlink_to(processed_path.name)
+            print(f"Created symlink: {symlink_path} -> {processed_path.name}")
+        except Exception as e:
+            print(f"Warning: Could not create symlink: {e}")
     
     print("="*60)
-    print("TACO Dataset Preparation")
+    print("TACO Dataset Preparation (WITH STRATIFICATION)")
+    print("="*60)
+    print(f"Output: {processed_path}")
+    print(f"Version: {version if version else 'overwrite'}")
     print("="*60)
     
     # Load annotations
@@ -166,10 +382,35 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
     data = load_coco_annotations(annotations_file)
     valid_image_ids, filtered_images = filter_images_by_annotations(data, min_annotations)
     
-    # Split dataset
-    print(f"\nSplitting (val={val_split}, test={test_split}, seed={seed})...")
-    train_images, val_images, test_images = split_dataset(filtered_images, val_split, 
-                                                           test_split, seed)
+    # Analyze class distribution
+    class_info = analyze_class_distribution(data)
+    minority_classes = identify_minority_classes(class_info['class_counts'], minority_threshold)
+    
+    print(f"\n  Minority classes (< {minority_threshold} annotations): {len(minority_classes)}")
+    for cat_id in sorted(minority_classes):
+        cat_name = class_info['cat_id_to_name'][cat_id]
+        count = class_info['class_counts'][cat_id]
+        print(f"    - {cat_name} ({cat_id}): {count} annotations")
+    
+    # Analyze multi-label images
+    multi_info = analyze_multi_label_images(data, minority_classes)
+    
+    # Split dataset (stratified or random)
+    print(f"\nSplitting (val={val_split}, test={test_split}, seed={seed}, stratify={stratify})...")
+    
+    if stratify:
+        train_images, val_images, test_images = stratified_split(
+            filtered_images, multi_info['img_to_anns'], minority_classes,
+            val_split, test_split, seed
+        )
+    else:
+        # Fallback to random split
+        train_val, test_images = train_test_split(filtered_images, test_size=test_split, 
+                                                  random_state=seed)
+        val_size_adjusted = val_split / (1 - test_split)
+        train_images, val_images = train_test_split(train_val, test_size=val_size_adjusted, 
+                                                    random_state=seed)
+    
     print(f"  Train: {len(train_images)}, Val: {len(val_images)}, Test: {len(test_images)}")
     
     # Create split annotations
@@ -177,6 +418,27 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
     train_data, _ = create_split_annotations(data, train_images, 'train')
     val_data, _ = create_split_annotations(data, val_images, 'val')
     test_data, _ = create_split_annotations(data, test_images, 'test')
+    
+    # Analyze class distribution in splits
+    print("\n" + "="*60)
+    print("CLASS DISTRIBUTION PER SPLIT")
+    print("="*60)
+    for split_name, split_data in [('Train', train_data), ('Val', val_data), ('Test', test_data)]:
+        split_class_counts = Counter(ann['category_id'] for ann in split_data['annotations'])
+        minority_in_split = sum(split_class_counts[cat_id] for cat_id in minority_classes 
+                               if cat_id in split_class_counts)
+        print(f"\n{split_name}:")
+        print(f"  Total annotations: {len(split_data['annotations'])}")
+        print(f"  Minority class annotations: {minority_in_split}")
+        print(f"  Classes present: {len(split_class_counts)}/{len(class_info['class_counts'])}")
+        
+        # Show minority class distribution
+        print(f"  Minority class breakdown:")
+        for cat_id in sorted(minority_classes):
+            count = split_class_counts.get(cat_id, 0)
+            if count > 0:
+                cat_name = class_info['cat_id_to_name'][cat_id]
+                print(f"    - {cat_name}: {count}")
     
     # Save annotations
     print("\nSaving...")
@@ -195,6 +457,25 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
     
     # Save statistics
     stats = compute_statistics(data, train_data, val_data, test_data)
+    stats['minority_classes'] = {
+        'threshold': minority_threshold,
+        'classes': {class_info['cat_id_to_name'][cat_id]: class_info['class_counts'][cat_id] 
+                   for cat_id in sorted(minority_classes)}
+    }
+    stats['version_info'] = {
+        'version': version if version else 'overwrite',
+        'timestamp': datetime.now().isoformat(),
+        'parameters': {
+            'val_split': val_split,
+            'test_split': test_split,
+            'seed': seed,
+            'min_annotations': min_annotations,
+            'stratify': stratify,
+            'minority_threshold': minority_threshold,
+            'duplicate_multi_label': duplicate_multi_label,
+            'iou_threshold': iou_threshold
+        }
+    }
     with open(processed_path / 'dataset_stats.json', 'w') as f:
         json.dump(stats, f, indent=2)
     
@@ -202,10 +483,15 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
     print("\n" + "="*60)
     print("COMPLETE!")
     print("="*60)
+    print(f"Version: {stats['version_info']['version']}")
+    print(f"Output: {processed_path}")
     print(f"Train: {stats['train']['images']} images ({stats['train']['annotations']} annotations)")
     print(f"Val:   {stats['val']['images']} images ({stats['val']['annotations']} annotations)")
     print(f"Test:  {stats['test']['images']} images ({stats['test']['annotations']} annotations)")
-    print(f"Output: {processed_path}")
+    print(f"Minority classes: {len(minority_classes)} (< {minority_threshold} annotations)")
+    print(f"Stratified split: {stratify}")
+    if not overwrite:
+        print(f"Symlink 'processed' points to: {processed_path.name}")
     print("="*60)
 
 
@@ -218,7 +504,13 @@ def main():
         val_split=args.val_split,
         test_split=args.test_split,
         seed=args.seed,
-        min_annotations=args.min_annotations
+        min_annotations=args.min_annotations,
+        stratify=args.stratify,
+        minority_threshold=args.minority_threshold,
+        duplicate_multi_label=args.duplicate_multi_label,
+        iou_threshold=args.iou_threshold,
+        version=args.version,
+        overwrite=args.overwrite
     )
 
 

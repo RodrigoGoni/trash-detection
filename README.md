@@ -358,3 +358,9 @@ Project Link: [https://github.com/RodrigoGoni/trash-detection](https://github.co
 
 ---
 
+El stratify SÍ funcionó bien para las clases con suficientes muestras. El problema es el desbalanceo extremo inherente del dataset TACO.
+
+Aceptar el desbalanceo y usar class weights en training
+Eliminar las 12-15 clases ultra-raras del dataset
+Aumentar manualmente las clases raras con data augmentation agresivo
+Usar loss functions especializadas (Focal Loss, CB Loss)

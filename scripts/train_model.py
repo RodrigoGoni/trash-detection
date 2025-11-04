@@ -52,9 +52,13 @@ def load_config(config_path: str) -> dict:
 
 
 def setup_mlflow(config: dict):
-    """Setup MLflow experiment tracking."""
+    """Setup MLflow experiment tracking with hierarchical structure."""
     mlflow.set_tracking_uri(config['mlflow']['tracking_uri'])
-    mlflow.set_experiment(config['experiment']['name'])
+    
+    # Create hierarchical experiment name for better organization
+    # Format: taco-detection/{model_type}/{backbone}/experiments
+    experiment_name = f"taco-detection/{config['model']['name'].lower()}/{config['model']['backbone']}/experiments"
+    mlflow.set_experiment(experiment_name)
 
 
 def get_system_info():
@@ -177,28 +181,49 @@ def log_gpu_metrics(step: int):
 
 
 def log_config_to_mlflow(config: dict):
-    """Log all configuration to MLflow."""
-    # Log main parameters
-    mlflow.log_param("model_name", config['model']['name'])
-    mlflow.log_param("backbone", config['model']['backbone'])
-    mlflow.log_param("num_classes", config['model']['num_classes'])
-    mlflow.log_param("batch_size", config['data']['batch_size'])
-    mlflow.log_param("num_epochs", config['training']['num_epochs'])
-    mlflow.log_param("optimizer", config['training']['optimizer']['type'])
-    mlflow.log_param("learning_rate", config['training']['optimizer']['lr'])
-    mlflow.log_param("dataset_version", config['data']['dataset_version'])
+    """Log all configuration to MLflow with organized parameters and tags for benchmarking."""
+    mlflow.set_tags({
+        # Model identification
+        "model.type": config['model']['name'].lower(),
+        "model.backbone": config['model']['backbone'],
+        "model.variant": "baseline" if all(v == 0.0 for v in config['data']['augmentation'].values()) else "augmented",
+        
+        # Dataset information
+        "data.version": config['data']['dataset_version'],
+        "data.size": config['data']['img_size'],
+        
+        # Training type
+        "training.hardware": "gpu" if torch.cuda.is_available() else "cpu",
+        "training.batch_size": config['data']['batch_size'],
+        "training.optimizer": config['training']['optimizer']['type'],
+        
+        # Experiment categorization
+        "experiment.type": "benchmark",
+        "experiment.phase": "development"
+    })
     
-    # Log preprocessing parameters
-    for key, value in config['data']['preprocessing'].items():
-        mlflow.log_param(f"preprocess_{key}", value)
+    mlflow.log_params({
+        # Model parameters
+        "model.num_classes": config['model']['num_classes'],
+        "model.pretrained": config['model'].get('pretrained', True),
+        
+        # Training parameters
+        "train.epochs": config['training']['num_epochs'],
+        "train.learning_rate": config['training']['optimizer']['lr'],
+        "train.momentum": config['training']['optimizer']['momentum'],
+        "train.weight_decay": config['training']['optimizer']['weight_decay'],
+        
+        # Scheduler parameters
+        "scheduler.type": config['training']['scheduler']['type'],
+        "scheduler.step_size": config['training']['scheduler']['step_size'],
+        "scheduler.gamma": config['training']['scheduler']['gamma']
+    })
     
-    # Log augmentation parameters
-    for key, value in config['data']['augmentation'].items():
-        mlflow.log_param(f"aug_{key}", value)
+    # Log preprocessing configuration as a single parameter (for reference)
+    mlflow.log_param("preprocessing_config", config['data']['preprocessing'])
     
-    # Log scheduler parameters
-    for key, value in config['training']['scheduler'].items():
-        mlflow.log_param(f"scheduler_{key}", value)
+    # Log augmentation configuration as a single parameter
+    mlflow.log_param("augmentation_config", config['data']['augmentation'])
 
 
 def train_one_epoch(model, dataloader, optimizer, device, epoch, scaler=None, grad_clip_norm=None):

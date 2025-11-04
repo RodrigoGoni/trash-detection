@@ -4,8 +4,10 @@
 experiment:
   name: "taco_detection_baseline"
   tags:
-    - "baseline"
     - "no_augmentation"
+    - "modern_config"
+    - "adamw_optimizer"
+    - "cosine_scheduler"
     - "faster_rcnn"
     - "resnet50"
   description: "Faster R-CNN baseline WITHOUT augmentation (only letterbox) for TACO object detection"
@@ -13,8 +15,8 @@ experiment:
 # Data settings
 data:
   processed_dir: "./data/processed"
-  batch_size: 32
-  num_workers: 4
+  batch_size: 16
+  num_workers: 20
   img_size: 640
   dataset_version: "v1.0"  # Track dataset version
   
@@ -72,18 +74,26 @@ training:
   num_epochs: 50
   device: "cuda"
   
-  # Optimizer
+  # Optimizer - AdamW (modern best practice for vision)
   optimizer:
-    type: "sgd"
-    lr: 0.005
-    momentum: 0.9
-    weight_decay: 0.0005
+    type: "adamw"              # AdamW with decoupled weight decay
+    lr: 0.0001                 # Lower LR for AdamW (typical: 1e-4 to 1e-3)
+    betas: [0.9, 0.999]        # Adam betas (momentum-like parameters)
+    weight_decay: 0.01         # L2 regularization (decoupled in AdamW)
+    eps: 0.00000001            # Numerical stability (1e-8)
   
-  # Scheduler
+  # Scheduler - Cosine Annealing with Warmup (modern best practice)
   scheduler:
-    type: "step_lr"
-    step_size: 10
-    gamma: 0.1
+    type: "cosine_annealing_warmup"  # Smooth decay to 0
+    warmup_epochs: 5                 # Linear warmup for first 5 epochs
+    min_lr: 0.000001                 # Minimum learning rate at end (1e-6)
+    # Cosine annealing will smoothly reduce LR from initial to min_lr
+  
+  # Mixed Precision Training (for faster training and less memory)
+  use_amp: true                # Automatic Mixed Precision (FP16)
+  
+  # Gradient Clipping (prevent exploding gradients)
+  grad_clip_norm: 1.0          # Clip gradients to max norm of 1.0
   
   # Checkpointing
   save_dir: "./models/checkpoints"
@@ -93,7 +103,7 @@ training:
   val_frequency: 1  # Validate every N epochs
   
   # Early stopping
-  patience: 10
+  patience: 15                 # Increased patience for cosine annealing
 
 # MLflow settings
 mlflow:
