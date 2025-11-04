@@ -22,6 +22,7 @@ from src.models.detector import TrashDetector
 from src.models.evaluate import ObjectDetectionEvaluator
 from src.training.optimizers import create_optimizer, create_scheduler
 from src.utils.system_info import get_system_info, log_gpu_metrics_to_mlflow
+from src.utils.training_logger import TrainingLogger
 from src.utils.mlflow_utils import (
     setup_mlflow,
     get_dataset_info,
@@ -34,7 +35,11 @@ from src.utils.mlflow_utils import (
     log_training_tags,
     log_system_parameters,
     log_dataset_parameters,
-    register_model_in_mlflow
+    register_model_in_mlflow,
+    log_epoch_metrics,
+    log_validation_detection_metrics,
+    log_test_metrics,
+    log_final_training_metrics
 )
 
 
@@ -118,8 +123,9 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, scaler=None, gr
         num_batches += 1
         
         if (batch_idx + 1) % 10 == 0:
-            print(f"Epoch [{epoch}] Batch [{batch_idx+1}/{len(dataloader)}] "
-                  f"Loss: {losses.item():.4f}")
+            TrainingLogger.print_batch_progress(
+                epoch, batch_idx, len(dataloader), losses.item(), frequency=50
+            )
     
     avg_loss = total_loss / num_batches
     return avg_loss
@@ -246,9 +252,7 @@ def main():
         augmentation_config=None  # No augmentation for test
     )
     
-    print(f"Train batches: {len(train_loader)}, "
-          f"Val batches: {len(val_loader)}, "
-          f"Test batches: {len(test_loader)}")
+    TrainingLogger.print_dataloader_info(len(train_loader), len(val_loader), len(test_loader))
     
     # Create model
     print("Creating model...")
@@ -258,11 +262,9 @@ def main():
     ).to(device)
     
     # Create optimizer using factory function
-    print(f"Creating optimizer: {config['training']['optimizer']['type'].upper()}")
     optimizer = create_optimizer(model.parameters(), config['training']['optimizer'])
     
     # Create scheduler using factory function
-    print(f"Creating scheduler: {config['training']['scheduler']['type']}")
     scheduler = create_scheduler(
         optimizer, 
         config['training']['scheduler'], 
@@ -272,18 +274,16 @@ def main():
     # Setup mixed precision training (AMP)
     use_amp = config['training'].get('use_amp', False)
     scaler = torch.cuda.amp.GradScaler() if use_amp else None
-    if use_amp:
-        print("Using Automatic Mixed Precision (AMP) training")
     
     # Setup MLflow
     setup_mlflow(config)
     
     # Get system and dataset info
-    print("\nCollecting system information...")
     system_info = get_system_info()
-    
-    print("Collecting dataset information...")
     dataset_info = get_dataset_info(config['data']['processed_dir'])
+    
+    # Print setup information
+    TrainingLogger.print_setup_info(config, system_info, dataset_info)
     
     # Create comprehensive run name
     dataset_version = config['data'].get('dataset_version', 'unknown')
@@ -335,24 +335,23 @@ def main():
             json.dump(system_info, f, indent=2)
         mlflow.log_artifact(str(system_info_path))
         
-        print(f"\n{'='*60}")
-        print(f"MLflow Run: {mlflow.active_run().info.run_id}")
-        print(f"Experiment: {config['experiment']['name']}")
-        print(f"Dataset: {dataset_version} (hash: {dataset_info.get('dataset_hash', 'unknown')})")
-        print(f"GPU: {system_info.get('gpu_name', 'CPU only')}")
-        print(f"{'='*60}")
+        # Print MLflow tracking info
+        TrainingLogger.print_mlflow_info(
+            run_id=mlflow.active_run().info.run_id,
+            experiment_name=config['experiment']['name'],
+            dataset_version=dataset_version,
+            dataset_hash=dataset_info.get('dataset_hash', 'unknown')
+        )
         
         # Training loop
         best_val_loss = float('inf')
         patience = 10
         patience_counter = 0
         
-        print(f"\nStarting training for {config['training']['num_epochs']} epochs...")
+        TrainingLogger.print_section(f"TRAINING ({config['training']['num_epochs']} epochs)")
         
         for epoch in range(1, config['training']['num_epochs'] + 1):
-            print(f"\n{'='*60}")
-            print(f"Epoch {epoch}/{config['training']['num_epochs']}")
-            print(f"{'='*60}")
+            TrainingLogger.print_epoch_header(epoch, config['training']['num_epochs'])
             
             # Get gradient clipping value
             grad_clip_norm = config['training'].get('grad_clip_norm', None)
@@ -363,16 +362,17 @@ def main():
                 scaler=scaler,
                 grad_clip_norm=grad_clip_norm
             )
-            print(f"\nTrain Loss: {train_loss:.4f}")
             
             # Validate
             val_loss = validate(model, val_loader, device)
-            print(f"Val Loss: {val_loss:.4f}")
             
             # Log basic metrics
-            mlflow.log_metric("train_loss", train_loss, step=epoch)
-            mlflow.log_metric("val_loss", val_loss, step=epoch)
-            mlflow.log_metric("learning_rate", optimizer.param_groups[0]['lr'], step=epoch)
+            log_epoch_metrics(
+                train_loss=train_loss,
+                val_loss=val_loss,
+                learning_rate=optimizer.param_groups[0]['lr'],
+                step=epoch
+            )
             
             # Log GPU metrics
             log_gpu_metrics_to_mlflow(step=epoch)
@@ -380,10 +380,6 @@ def main():
             # Evaluate with detection metrics based on val_frequency
             val_frequency = config['training'].get('val_frequency', 1)
             if epoch % val_frequency == 0 or epoch == config['training']['num_epochs']:
-                print(f"\n{'-'*60}")
-                print(f"Computing Detection Metrics (Epoch {epoch})...")
-                print(f"{'-'*60}")
-                
                 val_metrics = evaluate_with_metrics(
                     model, val_loader, device, 
                     config['model']['num_classes'], 
@@ -391,28 +387,18 @@ def main():
                     verbose=False
                 )
                 
-                # Display metrics in a nice table format
-                print(f"\n{'='*60}")
-                print(f"VALIDATION METRICS (Epoch {epoch}) [score_threshold=0.05]")
-                print(f"{'='*60}")
-                print(f"  mAP@0.5    : {val_metrics['mAP']:.4f}")
-                print(f"  Precision  : {val_metrics['precision']:.4f}")
-                print(f"  Recall     : {val_metrics['recall']:.4f}")
-                print(f"  F1-Score   : {val_metrics['f1_score']:.4f}")
-                print(f"  TP/FP/FN   : {val_metrics['true_positives']}/{val_metrics['false_positives']}/{val_metrics['false_negatives']}")
-                print(f"{'='*60}")
-                
                 # Log detection metrics to MLflow
-                mlflow.log_metric("val_mAP", val_metrics['mAP'], step=epoch)
-                mlflow.log_metric("val_precision", val_metrics['precision'], step=epoch)
-                mlflow.log_metric("val_recall", val_metrics['recall'], step=epoch)
-                mlflow.log_metric("val_f1_score", val_metrics['f1_score'], step=epoch)
+                log_validation_detection_metrics(val_metrics, step=epoch, prefix="val")
+                
+                # Print compact validation metrics
+                TrainingLogger.print_validation_metrics(epoch, val_metrics, threshold=0.05)
             
             # Learning rate scheduler step
             scheduler.step()
             
             # Save best model
-            if val_loss < best_val_loss:
+            is_best = val_loss < best_val_loss
+            if is_best:
                 best_val_loss = val_loss
                 patience_counter = 0
                 
@@ -425,70 +411,48 @@ def main():
                     'config': config
                 }, best_model_path)
                 
-                print(f">> Saved best model (val_loss: {val_loss:.4f})")
-                
                 # Log to MLflow
                 mlflow.log_artifact(str(best_model_path))
             else:
                 patience_counter += 1
-                print(f"No improvement. Patience: {patience_counter}/{patience}")
+            
+            # Print epoch summary
+            patience_info = f"Early stopping: {patience_counter}/{patience}" if patience_counter > 0 else None
+            TrainingLogger.print_epoch_summary(
+                epoch, train_loss, val_loss, 
+                optimizer.param_groups[0]['lr'],
+                best_model=is_best,
+                patience_info=patience_info
+            )
             
             # Early stopping
             if patience_counter >= patience:
-                print(f"\nEarly stopping triggered after {epoch} epochs")
+                print(f"\n⚠ Early stopping triggered after {epoch} epochs")
                 break
         
         # Log final metrics
-        mlflow.log_metric("best_val_loss", best_val_loss)
-        mlflow.log_metric("total_epochs", epoch)
+        log_final_training_metrics(best_val_loss, epoch)
         
         # Final evaluation on test set
-        print(f"\n{'='*60}")
-        print("Final Evaluation on Test Set")
-        print(f"{'='*60}")
+        TrainingLogger.print_section("FINAL EVALUATION")
         
         # Load best model
         checkpoint = torch.load(best_model_path)
         model.load_state_dict(checkpoint['model_state_dict'])
         
         # Evaluate on test set with detection metrics
-        print("Evaluating best model on test set...")
         test_metrics = evaluate_with_metrics(
             model, test_loader, device,
             config['model']['num_classes'],
             split='test',
-            verbose=True  # Show detailed output for final evaluation
+            verbose=False
         )
         
-        # Print detailed test metrics
-        print(f"\n{'='*60}")
-        print(f"FINAL TEST SET METRICS")
-        print(f"{'='*60}")
-        print(f"  mAP@0.5    : {test_metrics['mAP']:.4f}")
-        print(f"  Precision  : {test_metrics['precision']:.4f}")
-        print(f"  Recall     : {test_metrics['recall']:.4f}")
-        print(f"  F1-Score   : {test_metrics['f1_score']:.4f}")
-        print(f"  TP/FP/FN   : {test_metrics['true_positives']}/{test_metrics['false_positives']}/{test_metrics['false_negatives']}")
-        print(f"{'='*60}")
+        # Print test metrics
+        TrainingLogger.print_test_metrics(test_metrics, threshold=0.5)
         
         # Log test metrics to MLflow
-        mlflow.log_metric("test_mAP", test_metrics['mAP'])
-        mlflow.log_metric("test_precision", test_metrics['precision'])
-        mlflow.log_metric("test_recall", test_metrics['recall'])
-        mlflow.log_metric("test_f1_score", test_metrics['f1_score'])
-        mlflow.log_metric("test_true_positives", test_metrics['true_positives'])
-        mlflow.log_metric("test_false_positives", test_metrics['false_positives'])
-        mlflow.log_metric("test_false_negatives", test_metrics['false_negatives'])
-        
-        mlflow.log_metrics({
-            "benchmark.map50": test_metrics['mAP'],
-            "benchmark.f1": test_metrics['f1_score'],
-            "benchmark.precision": test_metrics['precision'],
-            "benchmark.recall": test_metrics['recall'],
-            "benchmark.true_positives": test_metrics['true_positives'],
-            "benchmark.false_positives": test_metrics['false_positives'],
-            "benchmark.false_negatives": test_metrics['false_negatives']
-        })
+        log_test_metrics(test_metrics)
         
         # Save test metrics to JSON for detailed analysis
         test_metrics_path = checkpoint_dir / 'test_metrics.json'
@@ -500,12 +464,9 @@ def main():
         
         mlflow.log_artifact(str(test_metrics_path))
         
-
-        print(f"\n{'='*60}")
-        print("Registering model in MLflow Model Registry...")
-        print(f"{'='*60}")
+        # Register model in MLflow
+        TrainingLogger.print_subsection("Model Registration")
         
-        # Register model in MLflow using utility function
         version = register_model_in_mlflow(
             model=model,
             config=config,
@@ -519,34 +480,25 @@ def main():
         
         if version:
             model_name = f"taco-{config['model']['name'].lower()}-{config['model']['backbone']}"
-            print(f"✓ Model registered: {model_name} (version {version})")
-            print(f"  Test mAP@0.5: {test_metrics['mAP']:.4f}")
-            print(f"  Precision: {test_metrics['precision']:.4f}")
-            print(f"  Recall: {test_metrics['recall']:.4f}")
-            print(f"  Dataset: {dataset_version} (hash: {dataset_info.get('dataset_hash', 'unknown')})")
-            print(f"  Optimizer: {config['training']['optimizer']['type'].upper()}")
-            print(f"  Scheduler: {config['training']['scheduler']['type']}")
+            TrainingLogger.print_model_registration(
+                model_name=model_name,
+                version=version,
+                metrics=test_metrics,
+                dataset_version=dataset_version,
+                optimizer=config['training']['optimizer']['type'].upper(),
+                scheduler=config['training']['scheduler']['type']
+            )
         
-        print(f"{'='*60}")
-        
-        print(f"\n{'='*60}")
-        print(f"TRAINING COMPLETED")
-        print(f"{'='*60}")
-        print(f"\nTraining Summary:")
-        print(f"  Total Epochs     : {epoch}")
-        print(f"  Best Val Loss    : {best_val_loss:.4f}")
-        print(f"\nFinal Test Set Performance:")
-        print(f"  mAP@0.5          : {test_metrics['mAP']:.4f}")
-        print(f"  Precision        : {test_metrics['precision']:.4f}")
-        print(f"  Recall           : {test_metrics['recall']:.4f}")
-        print(f"  F1-Score         : {test_metrics['f1_score']:.4f}")
-        print(f"\nSaved Artifacts:")
-        print(f"  Best model       : {best_model_path}")
-        print(f"  Test metrics     : {test_metrics_path}")
-        print(f"\nView results in MLflow:")
-        print(f"  mlflow ui")
-        print(f"  http://localhost:5000")
-        print(f"{'='*60}\n")
+        # Print final summary
+        TrainingLogger.print_training_complete(
+            epoch=epoch,
+            best_val_loss=best_val_loss,
+            test_metrics=test_metrics,
+            paths={
+                'model': best_model_path,
+                'metrics': test_metrics_path
+            }
+        )
 
 
 if __name__ == '__main__':

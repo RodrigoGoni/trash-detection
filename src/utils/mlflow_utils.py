@@ -352,3 +352,81 @@ def register_model_in_mlflow(model, config: dict, test_metrics: dict,
     )
     
     return version
+
+
+def log_epoch_metrics(train_loss: float, val_loss: float, learning_rate: float, step: int):
+    """
+    Log basic training metrics for an epoch.
+    
+    Args:
+        train_loss: Training loss value
+        val_loss: Validation loss value
+        learning_rate: Current learning rate
+        step: Epoch number
+    """
+    mlflow.log_metrics({
+        "train_loss": train_loss,
+        "val_loss": val_loss,
+        "learning_rate": learning_rate
+    }, step=step)
+
+
+def log_validation_detection_metrics(metrics: dict, step: int, prefix: str = "val"):
+    """
+    Log validation detection metrics (mAP, precision, recall, F1).
+    
+    Args:
+        metrics: Dictionary with detection metrics
+        step: Epoch number
+        prefix: Metric prefix (default: "val")
+    """
+    mlflow.log_metrics({
+        f"{prefix}_mAP": metrics['mAP'],
+        f"{prefix}_precision": metrics['precision'],
+        f"{prefix}_recall": metrics['recall'],
+        f"{prefix}_f1_score": metrics['f1_score']
+    }, step=step)
+
+
+def log_test_metrics(test_metrics: dict):
+    """
+    Log comprehensive test set metrics including benchmark metrics.
+    
+    Args:
+        test_metrics: Dictionary with all test metrics
+    """
+    # Log individual test metrics
+    mlflow.log_metrics({
+        "test_mAP": test_metrics['mAP'],
+        "test_precision": test_metrics['precision'],
+        "test_recall": test_metrics['recall'],
+        "test_f1_score": test_metrics['f1_score'],
+        "test_true_positives": test_metrics['true_positives'],
+        "test_false_positives": test_metrics['false_positives'],
+        "test_false_negatives": test_metrics['false_negatives']
+    })
+    
+    # Log benchmark metrics (for easy comparison)
+    mlflow.log_metrics({
+        "benchmark.map50": test_metrics['mAP'],
+        "benchmark.f1": test_metrics['f1_score'],
+        "benchmark.precision": test_metrics['precision'],
+        "benchmark.recall": test_metrics['recall'],
+        "benchmark.true_positives": test_metrics['true_positives'],
+        "benchmark.false_positives": test_metrics['false_positives'],
+        "benchmark.false_negatives": test_metrics['false_negatives']
+    })
+
+
+def log_final_training_metrics(best_val_loss: float, total_epochs: int):
+    """
+    Log final training summary metrics.
+    
+    Args:
+        best_val_loss: Best validation loss achieved
+        total_epochs: Total number of epochs trained
+    """
+    mlflow.log_metrics({
+        "best_val_loss": best_val_loss,
+        "total_epochs": total_epochs
+    })
