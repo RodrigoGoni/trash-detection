@@ -358,9 +358,86 @@ Project Link: [https://github.com/RodrigoGoni/trash-detection](https://github.co
 
 ---
 
-El stratify SÍ funcionó bien para las clases con suficientes muestras. El problema es el desbalanceo extremo inherente del dataset TACO.
+## 🎯 Handling Class Imbalance
 
-Aceptar el desbalanceo y usar class weights en training
-Eliminar las 12-15 clases ultra-raras del dataset
-Aumentar manualmente las clases raras con data augmentation agresivo
-Usar loss functions especializadas (Focal Loss, CB Loss)
+El dataset TACO presenta un **desbalanceo extremo de clases** con 36 clases minoritarias (<50 anotaciones) y algunas con solo 1-2 muestras. Para manejar esto, el proyecto implementa:
+
+### Class Weighting Strategies
+
+Tres métodos de ponderación de clases en `src/training/class_weights.py`:
+
+1. **Inverse Frequency**: Peso inversamente proporcional a la frecuencia
+2. **Effective Number** (recomendado): Basado en el paper "Class-Balanced Loss" (CVPR 2019)
+3. **Square Root Inverse**: Balance intermedio
+
+```python
+from src.training.class_weights import compute_class_weights
+
+weights = compute_class_weights(
+    class_counts=class_counts,
+    num_classes=60,
+    method='effective',  # 'inverse', 'effective', or 'sqrt'
+    beta=0.9999          # Para 'effective' method
+)
+```
+
+### Specialized Loss Functions
+
+Implementado en `src/training/losses.py`:
+
+1. **Focal Loss**: Reduce el peso de ejemplos fáciles, se enfoca en casos difíciles
+   - Paper: "Focal Loss for Dense Object Detection" (Lin et al., ICCV 2017)
+   - `gamma=2.0` (recomendado)
+
+2. **Class-Balanced Focal Loss** ⭐ (recomendado): Combina Focal Loss con effective number weighting
+   - Paper: "Class-Balanced Loss Based on Effective Number of Samples" (Cui et al., CVPR 2019)
+   - `beta=0.9999` para TACO dataset
+
+### Configuración en `train_config.yaml`
+
+```yaml
+training:
+  loss:
+    type: "cb_focal"              # 'ce', 'focal', or 'cb_focal'
+    use_class_weights: true       # Habilitar pesos de clase
+    class_weight_method: "effective"  # 'inverse', 'effective', or 'sqrt'
+    gamma: 2.0                    # Parámetro de enfoque para Focal Loss
+    beta: 0.9999                  # Beta para Class-Balanced Loss (0.999-0.9999)
+    bbox_loss_weight: 1.0         # Peso para bbox regression loss
+    use_weighted_bbox: true       # Aplicar pesos a bbox loss
+```
+
+### Análisis del Dataset
+
+El script `prepare_data.py` genera splits con stratification:
+
+```bash
+python scripts/prepare_data.py --stratify --overwrite
+```
+
+**Distribución de clases minoritarias (<50 anotaciones):**
+- 36 clases minoritarias identificadas
+- Rango: 1-49 anotaciones por clase
+- Ejemplos: "Carded blister pack" (1), "Battery" (2), "Pizza box" (3)
+
+**Resultados del split estratificado:**
+- Train: 1049 imágenes (3309 anotaciones, 371 de clases minoritarias)
+- Val: 226 imágenes (835 anotaciones, 88 de clases minoritarias)
+- Test: 225 imágenes (640 anotaciones, 84 de clases minoritarias)
+
+### Testing
+
+Validar la implementación:
+
+```bash
+python scripts/test_class_weights.py
+```
+
+Este script valida:
+- ✓ Cálculo de pesos de clase
+- ✓ Focal Loss y Class-Balanced Focal Loss
+- ✓ Integración con el modelo Faster R-CNN
+
+---
+
+El stratify SÍ funcionó bien para las clases con suficientes muestras. El problema es el desbalanceo extremo inherente del dataset TACO.

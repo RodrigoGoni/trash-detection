@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
 import torchvision.models.detection.roi_heads as roi_heads_module
 from typing import Optional, Dict, List
 
@@ -13,7 +12,6 @@ from torchvision.models.detection import (
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 from ultralytics import YOLO, settings as ultralytics_settings
-from src.training.yolo_trainer import train_yolo_with_custom_loss
 
 
 def custom_fastrcnn_loss(class_logits, box_regression, labels, regression_targets, 
@@ -108,8 +106,6 @@ class YOLOv11Detector(nn.Module):
         num_classes: Number of classes without background
         model_size: Model variant (n, s, m, l, x)
         pretrained: Use pretrained weights
-        custom_loss_fn: Optional custom loss function
-        class_weights: Optional class weights for imbalanced data
         img_size: Input image size
     """
 
@@ -118,8 +114,6 @@ class YOLOv11Detector(nn.Module):
         num_classes: int,
         model_size: str = 's',
         pretrained: bool = True,
-        custom_loss_fn = None,
-        class_weights = None,
         img_size: int = 640
     ):
         super().__init__()
@@ -132,8 +126,6 @@ class YOLOv11Detector(nn.Module):
         
         self.model = YOLO(model_name)
         self.num_classes = num_classes
-        self.custom_loss_fn = custom_loss_fn
-        self.class_weights = class_weights
         self.img_size = img_size
         self.model_size = model_size
         
@@ -147,14 +139,26 @@ class YOLOv11Detector(nn.Module):
         data_yaml: str,
         epochs: int = 100,
         batch_size: int = 16,
-        optimizer_config: Optional[Dict] = None,
-        scheduler_config: Optional[Dict] = None,
         device: str = 'cuda',
         project: str = './runs/detect',
         name: str = 'exp',
+        yolo_config: Optional[Dict] = None,
         **kwargs
     ):
-        """Train YOLO model"""
+        """Train YOLO model with configuration
+        
+        Args:
+            data_yaml: Path to data YAML file
+            epochs: Number of epochs
+            batch_size: Batch size
+            device: Device to use
+            project: Project directory
+            name: Experiment name
+            yolo_config: YOLO configuration dict from config file
+            **kwargs: Additional arguments override yolo_config
+        """
+        from src.training.yolo_trainer import train_yolo_model
+        
         ultralytics_settings.update({
             'mlflow': False,
             'comet': False,
@@ -162,19 +166,16 @@ class YOLOv11Detector(nn.Module):
             'wandb': False
         })
         
-        return train_yolo_with_custom_loss(
+        return train_yolo_model(
             model=self.model,
             data_yaml=data_yaml,
             epochs=epochs,
             batch_size=batch_size,
             img_size=self.img_size,
-            custom_loss_fn=self.custom_loss_fn,
-            class_weights=self.class_weights,
-            optimizer_config=optimizer_config,
-            scheduler_config=scheduler_config,
             device=device,
             project=project,
             name=name,
+            yolo_config=yolo_config,
             **kwargs
         )
 

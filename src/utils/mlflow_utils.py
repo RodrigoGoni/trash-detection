@@ -461,30 +461,85 @@ def log_yolo_training_config(config: dict, system_info: dict, dataset_info: dict
     model_name = config['model']['name']
     model_size = config['model']['model_size']
     
+    # Check if using new yolo_training config structure
+    yolo_config = config.get('yolo_training', {})
+    training_config = config.get('training', {})
+    
+    # Get optimizer info from yolo_training or training section
+    if yolo_config:
+        optimizer_type = yolo_config.get('optimizer', 'auto')
+        learning_rate = yolo_config.get('lr0', 0.01)
+        scheduler_type = 'cosine' if yolo_config.get('cos_lr', False) else 'none'
+        patience = yolo_config.get('patience', 100)
+    else:
+        optimizer_config = training_config.get('optimizer', {})
+        optimizer_type = optimizer_config.get('type', 'auto')
+        learning_rate = optimizer_config.get('lr', 0.01)
+        scheduler_config = training_config.get('scheduler', {})
+        scheduler_type = scheduler_config.get('type', 'none')
+        patience = training_config.get('patience', 100)
+    
     mlflow.log_params({
         'model_name': model_name,
         'model_size': model_size,
         'num_classes': config['model']['num_classes'],
-        'epochs': config['training']['num_epochs'],
+        'epochs': training_config.get('num_epochs', 100),
         'batch_size': config['data']['batch_size'],
-        'optimizer': config['training']['optimizer']['type'],
-        'learning_rate': config['training']['optimizer']['lr'],
-        'scheduler': config['training']['scheduler']['type'],
+        'optimizer': optimizer_type,
+        'learning_rate': learning_rate,
+        'scheduler': scheduler_type,
         'image_size': config['data'].get('img_size', 640),
-        'patience': config['training'].get('patience', 100)
+        'patience': patience
     })
     
-    # Log optimizer parameters
-    optimizer_config = config['training']['optimizer']
-    if optimizer_config.get('type', '').lower() == 'adamw':
-        mlflow.log_param('weight_decay', optimizer_config.get('weight_decay', 0.0005))
-    elif optimizer_config.get('type', '').lower() == 'sgd':
-        mlflow.log_param('momentum', optimizer_config.get('momentum', 0.937))
-        mlflow.log_param('weight_decay', optimizer_config.get('weight_decay', 0.0005))
+    # Log YOLO-specific parameters if available
+    if yolo_config:
+        # Log key YOLO parameters
+        yolo_params = {
+            'yolo.dropout': yolo_config.get('dropout', 0.0),
+            'yolo.weight_decay': yolo_config.get('weight_decay', 0.0005),
+            'yolo.momentum': yolo_config.get('momentum', 0.937),
+            'yolo.warmup_epochs': yolo_config.get('warmup_epochs', 3.0),
+            'yolo.cos_lr': yolo_config.get('cos_lr', False),
+            'yolo.lrf': yolo_config.get('lrf', 0.01),
+            'yolo.box_weight': yolo_config.get('box', 7.5),
+            'yolo.cls_weight': yolo_config.get('cls', 0.5),
+            'yolo.dfl_weight': yolo_config.get('dfl', 1.5),
+            'yolo.multi_scale': yolo_config.get('multi_scale', False),
+            'yolo.rect': yolo_config.get('rect', False),
+            'yolo.compile': yolo_config.get('compile', False),
+            'yolo.val': yolo_config.get('val', True),
+            'yolo.plots': yolo_config.get('plots', True),
+            'yolo.save': yolo_config.get('save', True),
+        }
+        
+        # Log classes parameter if specified
+        classes_param = yolo_config.get('classes')
+        if classes_param is not None:
+            mlflow.log_param('yolo.classes', str(classes_param))
+        
+        mlflow.log_params(yolo_params)
+        
+        # Log augmentation parameters
+        if 'augmentation' in yolo_config:
+            aug_config = yolo_config['augmentation']
+            aug_params = {
+                f'yolo.aug.{k}': v 
+                for k, v in aug_config.items()
+            }
+            mlflow.log_params(aug_params)
+    else:
+        # Log optimizer parameters (old structure)
+        optimizer_config = training_config.get('optimizer', {})
+        if optimizer_config.get('type', '').lower() == 'adamw':
+            mlflow.log_param('weight_decay', optimizer_config.get('weight_decay', 0.0005))
+        elif optimizer_config.get('type', '').lower() == 'sgd':
+            mlflow.log_param('momentum', optimizer_config.get('momentum', 0.937))
+            mlflow.log_param('weight_decay', optimizer_config.get('weight_decay', 0.0005))
     
-    # Log loss configuration if present
-    if 'loss' in config['training']:
-        loss_config = config['training']['loss']
+    # Log loss configuration if present (old structure)
+    if 'loss' in training_config:
+        loss_config = training_config['loss']
         mlflow.set_tag("loss.type", loss_config.get('type', 'yolo_default'))
         mlflow.set_tag("loss.use_class_weights", loss_config.get('use_class_weights', False))
         mlflow.set_tag("loss.class_weight_method", loss_config.get('class_weight_method', 'none'))

@@ -11,22 +11,19 @@ import json
 from pathlib import Path
 import yaml
 
-def train_yolo_with_custom_loss(
+def train_yolo_model(
     model,
     data_yaml: str,
     epochs: int = 100,
     batch_size: int = 16,
     img_size: int = 640,
-    custom_loss_fn = None,
-    class_weights = None,
-    optimizer_config: Optional[Dict] = None,
-    scheduler_config: Optional[Dict] = None,
     device: str = 'cuda',
     project: str = './runs/detect',
     name: str = 'exp',
+    yolo_config: Optional[Dict] = None,
     **kwargs
 ):
-    """Train YOLO model
+    """Train YOLO model with configuration parameters.
     
     Args:
         model: YOLO model instance
@@ -34,19 +31,17 @@ def train_yolo_with_custom_loss(
         epochs: Number of training epochs
         batch_size: Batch size
         img_size: Image size
-        custom_loss_fn: Not used, kept for compatibility
-        class_weights: Not used, kept for compatibility
-        optimizer_config: Optimizer configuration dict
-        scheduler_config: Scheduler configuration dict
         device: Device to train on
         project: Project directory
         name: Experiment name
-        **kwargs: Additional YOLO training arguments
+        yolo_config: Dictionary with YOLO training parameters from config file
+        **kwargs: Additional YOLO training arguments (override yolo_config)
         
     Returns:
         Training results
     """
     
+    # Base training arguments
     train_args = {
         'data': data_yaml,
         'epochs': epochs,
@@ -56,38 +51,46 @@ def train_yolo_with_custom_loss(
         'project': project,
         'name': name,
         'verbose': True,
-        'plots': True,
-        'save': True,
         'exist_ok': True,
     }
     
-    # Disable YOLO's built-in integrations
+    # Disable YOLO's built-in integrations (we use MLflow)
     os.environ['MLFLOW_TRACKING_URI'] = ''
     try:
         settings.update({'mlflow': False})
     except:
         pass
     
-    # Add optimizer settings
-    if optimizer_config:
-        if optimizer_config.get('type', '').lower() == 'adamw':
-            train_args['optimizer'] = 'AdamW'
-            train_args['lr0'] = optimizer_config.get('lr', 0.001)
-            train_args['weight_decay'] = optimizer_config.get('weight_decay', 0.0005)
-        elif optimizer_config.get('type', '').lower() == 'sgd':
-            train_args['optimizer'] = 'SGD'
-            train_args['lr0'] = optimizer_config.get('lr', 0.01)
-            train_args['momentum'] = optimizer_config.get('momentum', 0.937)
-            train_args['weight_decay'] = optimizer_config.get('weight_decay', 0.0005)
+    # Apply YOLO-specific configuration if provided
+    if yolo_config:
+        # Direct training parameters
+        direct_params = [
+            'dropout', 'val', 'plots', 'save', 'lr0', 'lrf', 'momentum', 
+            'weight_decay', 'warmup_epochs', 'warmup_momentum', 
+            'warmup_bias_lr', 'box', 'cls', 'dfl', 'optimizer', 
+            'seed', 'deterministic', 'single_cls', 'classes', 'rect', 
+            'multi_scale', 'compile', 'cos_lr', 'close_mosaic', 'resume', 
+            'patience'
+        ]
+        
+        for param in direct_params:
+            if param in yolo_config:
+                train_args[param] = yolo_config[param]
+        
+        # Augmentation parameters
+        if 'augmentation' in yolo_config:
+            aug_config = yolo_config['augmentation']
+            aug_params = [
+                'hsv_h', 'hsv_s', 'hsv_v', 'degrees', 'translate',
+                'scale', 'shear', 'perspective', 'flipud', 'fliplr',
+                'mosaic', 'mixup', 'copy_paste'
+            ]
+            
+            for param in aug_params:
+                if param in aug_config:
+                    train_args[param] = aug_config[param]
     
-    # Add scheduler settings
-    if scheduler_config:
-        scheduler_type = scheduler_config.get('type', '').lower()
-        if 'cosine' in scheduler_type:
-            train_args['cos_lr'] = True
-            train_args['lrf'] = scheduler_config.get('min_lr', 0.01) / train_args.get('lr0', 0.001)
-    
-    # Merge additional kwargs
+    # Merge additional kwargs (these override yolo_config)
     train_args.update(kwargs)
     
     # Train model

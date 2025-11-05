@@ -1,0 +1,121 @@
+# Object Detection Training Configuration - YOLOv11
+# 
+# Este archivo demuestra cómo configurar el entrenamiento con YOLOv11
+# Copia y modifica según tus necesidades
+
+# Experiment settings
+experiment:
+  name: "taco_detection_yolo11m_baseline"
+  tags:
+    - "yolo11"
+    - "yolo11m"
+    - "no_augmentation"
+    - "adamw_optimizer"
+    - "cosine_scheduler"
+  description: "YOLOv11-medium for TACO dataset"
+
+# Data settings
+data:
+  processed_dir: "./data/processed"
+  batch_size: 16
+  num_workers: 12
+  img_size: 640
+  dataset_version: "v1.0"
+
+# Model settings
+model:
+  name: "YOLOv11"
+  model_size: "m"  # Options: 'n', 's', 'm', 'l', 'x'
+  pretrained: true
+  num_classes: 60  # 60 classes (no background for YOLO)
+
+# Training settings (basic parameters)
+training:
+  num_epochs: 5
+  device: "cuda"
+
+# ============================================================
+# YOLO-SPECIFIC TRAINING PARAMETERS
+# ============================================================
+# Estos parámetros se pasan directamente a YOLO durante el entrenamiento
+# Ref: https://docs.ultralytics.com/modes/train/
+yolo_training:
+  # ============================================================
+  # TRAINING BEHAVIOR
+  # ============================================================
+  dropout: 0.0                 # Dropout rate for regularization (0.0-0.5)
+  val: true                    # Enable validation during training
+  plots: true                  # Generate and save training plots
+  save: true                   # Save checkpoints
+  
+  # ============================================================
+  # LEARNING RATE & OPTIMIZATION
+  # ============================================================
+  optimizer: 'AdamW'           # Options: SGD, Adam, AdamW, NAdam, RAdam, RMSProp, auto
+  lr0: 0.001                   # Initial LR (SGD=1E-2, Adam/AdamW=1E-3)
+  lrf: 0.01                    # Final LR as fraction of lr0
+  momentum: 0.937              # Momentum for SGD or beta1 for Adam
+  weight_decay: 0.0005         # L2 regularization
+  
+  # ============================================================
+  # LEARNING RATE SCHEDULING
+  # ============================================================
+  cos_lr: true                 # Use cosine learning rate scheduler
+  warmup_epochs: 3.0           # Number of warmup epochs
+  warmup_momentum: 0.8         # Initial momentum during warmup
+  warmup_bias_lr: 0.1          # Bias learning rate during warmup
+  
+  # ============================================================
+  # LOSS WEIGHTS
+  # ============================================================
+  box: 7.5                     # Box loss weight
+  cls: 0.5                     # Classification loss weight
+  dfl: 1.5                     # Distribution focal loss weight
+  
+  # ============================================================
+  # TRAINING STRATEGY
+  # ============================================================
+  seed: 0                      # Random seed for reproducibility
+  deterministic: false          # Force deterministic algorithms
+  single_cls: false            # Treat multi-class as single class
+  classes: null                # List of class IDs to train on (null = all classes)
+  rect: false                  # Rectangular training (minimum padding strategy)
+  multi_scale: false           # Multi-scale training (+/-50% of imgsz)
+  compile: false               # PyTorch 2.x torch.compile (True, False, or mode string)
+  close_mosaic: 10             # Disable mosaic in last N epochs
+  resume: false                # Resume from last checkpoint
+  patience: 10                 # Early stopping patience
+  
+  # ============================================================
+  # DATA AUGMENTATION (YOLO-specific)
+  # ============================================================
+  # Estas augmentaciones son específicas de YOLO y se aplican automáticamente
+  # durante el entrenamiento. No requieren conversión previa de datos.
+  augmentation:
+    # Color augmentations
+    hsv_h: 0.0               # HSV Hue augmentation (0.0-1.0)
+    hsv_s: 0.0                # HSV Saturation augmentation (0.0-1.0)
+    hsv_v: 0.0                 # HSV Value augmentation (0.0-1.0)
+    
+    # Geometric augmentations
+    degrees: 0.0              # Image rotation (+/- degrees)
+    translate: 0.0             # Image translation (+/- fraction)
+    scale: 0.0                # Image scale (+/- gain)
+    shear: 0.0                 # Image shear (+/- degrees)
+    perspective: 0.0           # Perspective transformation (0.0-0.001)
+    
+    # Flip augmentations
+    flipud: 0.0                # Vertical flip probability (0.0-1.0)
+    fliplr: 0.0               # Horizontal flip probability (0.0-1.0)
+    
+    # Advanced augmentations
+    mosaic: 0.0                # Mosaic augmentation probability (0.0-1.0)
+    mixup: 0.0                 # Mixup augmentation probability (0.0-1.0)
+    copy_paste: 0.0            # Copy-paste augmentation probability (0.0-1.0)
+
+# MLflow settings
+mlflow:
+  tracking_uri: "./mlruns"
+  experiment_name: "taco-yolo-detection"
+  log_model: true
+  log_artifacts: true
