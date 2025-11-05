@@ -1,163 +1,186 @@
-"""
-Object detection models for trash detection
-"""
-
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
-from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN
-from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+import torchvision.models.detection.roi_heads as roi_heads_module
 from typing import Optional, Dict, List
 
+from torchvision.models.detection import (
+    fasterrcnn_resnet50_fpn, 
+    fasterrcnn_mobilenet_v3_large_fpn,
+    fasterrcnn_mobilenet_v3_large_320_fpn
+)
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+
+from ultralytics import YOLO, settings as ultralytics_settings
+from src.training.yolo_trainer import train_yolo_with_custom_loss
+
+
+def custom_fastrcnn_loss(class_logits, box_regression, labels, regression_targets, 
+                        custom_loss_fn=None):
+    """Custom loss function for Faster R-CNN with support for focal loss"""
+    labels = torch.cat(labels, dim=0)
+    regression_targets = torch.cat(regression_targets, dim=0)
+    
+    # Classification loss with custom loss function support
+    if custom_loss_fn is not None:
+        classification_loss = custom_loss_fn(class_logits, labels)
+    else:
+        classification_loss = F.cross_entropy(class_logits, labels)
+    
+    # Bounding box regression loss
+    sampled_pos_inds_subset = torch.where(labels > 0)[0]
+    labels_pos = labels[sampled_pos_inds_subset]
+    N, num_classes = class_logits.shape
+    box_regression = box_regression.reshape(N, box_regression.size(-1) // 4, 4)
+
+    box_loss = F.smooth_l1_loss(
+        box_regression[sampled_pos_inds_subset, labels_pos],
+        regression_targets[sampled_pos_inds_subset],
+        beta=1 / 9,
+        reduction="sum",
+    )
+    box_loss = box_loss / labels.numel()
+
+    return classification_loss, box_loss
 
 class TrashDetector(nn.Module):
-    """
-    Object detection model for trash detection using Faster R-CNN
-
+    """Faster R-CNN model for trash detection
+    
     Args:
-        num_classes: Number of object classes (including background)
-        backbone: Backbone architecture
-        pretrained: Whether to use pretrained weights
+        num_classes: Number of classes including background
+        backbone: Model backbone (resnet50, mobilenet_v3_large, mobilenet_v3_large_320)
+        pretrained: Use pretrained weights
+        custom_loss_fn: Optional custom loss function
     """
 
     def __init__(
         self,
         num_classes: int,
         backbone: str = 'resnet50',
-        pretrained: bool = True
+        pretrained: bool = True,
+        custom_loss_fn = None
     ):
         super().__init__()
 
         if backbone == 'resnet50':
-            # Load pretrained Faster R-CNN
             self.model = fasterrcnn_resnet50_fpn(pretrained=pretrained)
-
-            # Replace the classifier with a new one
-            in_features = self.model.roi_heads.box_predictor.cls_score.in_features
-            self.model.roi_heads.box_predictor = FastRCNNPredictor(
-                in_features, num_classes)
+        elif backbone == 'mobilenet_v3_large':
+            self.model = fasterrcnn_mobilenet_v3_large_fpn(pretrained=pretrained)
+        elif backbone == 'mobilenet_v3_large_320':
+            self.model = fasterrcnn_mobilenet_v3_large_320_fpn(pretrained=pretrained)
         else:
             raise ValueError(f"Unsupported backbone: {backbone}")
+        
+        # Replace classifier head
+        in_features = self.model.roi_heads.box_predictor.cls_score.in_features
+        self.model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+        
+        self.custom_loss_fn = custom_loss_fn
+        
+        # Apply custom loss if provided
+        if custom_loss_fn is not None:
+            self._apply_custom_loss(custom_loss_fn)
+
+    def _apply_custom_loss(self, custom_loss_fn):
+        """Replace default loss with custom loss function"""
+        original_loss = roi_heads_module.fastrcnn_loss
+        
+        def wrapped_loss(class_logits, box_regression, labels, regression_targets):
+            return custom_fastrcnn_loss(
+                class_logits, box_regression, labels, regression_targets,
+                custom_loss_fn=custom_loss_fn
+            )
+        
+        roi_heads_module.fastrcnn_loss = wrapped_loss
+        self._original_fastrcnn_loss = original_loss
 
     def forward(self, images, targets=None):
-        """
-        Args:
-            images: List of images (Tensors)
-            targets: List of targets (Dicts) - only during training
-
-        Returns:
-            During training: losses dict
-            During inference: predictions list
-        """
         if self.training and targets is None:
-            raise ValueError("In training mode, targets should be passed")
-
+            raise ValueError("Targets required in training mode")
         return self.model(images, targets)
 
 
-class YOLOv5Wrapper(nn.Module):
-    """
-    Wrapper for YOLOv5 model
-    Note: Requires ultralytics package
+class YOLOv11Detector(nn.Module):
+    """YOLOv11 detector for trash detection
+    
+    Args:
+        num_classes: Number of classes without background
+        model_size: Model variant (n, s, m, l, x)
+        pretrained: Use pretrained weights
+        custom_loss_fn: Optional custom loss function
+        class_weights: Optional class weights for imbalanced data
+        img_size: Input image size
     """
 
     def __init__(
         self,
         num_classes: int,
-        model_size: str = 'yolov5s',
-        pretrained: bool = True
+        model_size: str = 's',
+        pretrained: bool = True,
+        custom_loss_fn = None,
+        class_weights = None,
+        img_size: int = 640
     ):
         super().__init__()
 
-        try:
-            import ultralytics
-            from ultralytics import YOLO
-        except ImportError:
-            raise ImportError(
-                "Please install ultralytics: pip install ultralytics")
+        valid_sizes = ['n', 's', 'm', 'l', 'x']
+        if model_size not in valid_sizes:
+            raise ValueError(f"Invalid model_size: {model_size}. Use one of {valid_sizes}")
 
-        # Load model
-        if pretrained:
-            self.model = YOLO(f'{model_size}.pt')
-        else:
-            self.model = YOLO(f'{model_size}.yaml')
-
+        model_name = f'yolo11{model_size}.pt' if pretrained else f'yolo11{model_size}.yaml'
+        
+        self.model = YOLO(model_name)
         self.num_classes = num_classes
+        self.custom_loss_fn = custom_loss_fn
+        self.class_weights = class_weights
+        self.img_size = img_size
+        self.model_size = model_size
+        
+        print(f"Loaded YOLOv11-{model_size.upper()} {'with pretrained weights' if pretrained else 'from scratch'}")
 
     def forward(self, x):
         return self.model(x)
 
-    def train_model(self, data_yaml: str, epochs: int = 100, **kwargs):
-        """Train the model"""
-        return self.model.train(data=data_yaml, epochs=epochs, **kwargs)
+    def train_yolo(
+        self,
+        data_yaml: str,
+        epochs: int = 100,
+        batch_size: int = 16,
+        optimizer_config: Optional[Dict] = None,
+        scheduler_config: Optional[Dict] = None,
+        device: str = 'cuda',
+        project: str = './runs/detect',
+        name: str = 'exp',
+        **kwargs
+    ):
+        """Train YOLO model"""
+        ultralytics_settings.update({
+            'mlflow': False,
+            'comet': False,
+            'tensorboard': False,
+            'wandb': False
+        })
+        
+        return train_yolo_with_custom_loss(
+            model=self.model,
+            data_yaml=data_yaml,
+            epochs=epochs,
+            batch_size=batch_size,
+            img_size=self.img_size,
+            custom_loss_fn=self.custom_loss_fn,
+            class_weights=self.class_weights,
+            optimizer_config=optimizer_config,
+            scheduler_config=scheduler_config,
+            device=device,
+            project=project,
+            name=name,
+            **kwargs
+        )
 
     def predict(self, source, **kwargs):
-        """Make predictions"""
-        return self.model.predict(source, **kwargs)
+        return self.model.predict(source, imgsz=self.img_size, **kwargs)
+    
+    def val(self, data_yaml: str, **kwargs):
+        return self.model.val(data=data_yaml, imgsz=self.img_size, **kwargs)
 
-
-class RetinaNetDetector(nn.Module):
-    """
-    RetinaNet object detection model
-    """
-
-    def __init__(
-        self,
-        num_classes: int,
-        backbone: str = 'resnet50',
-        pretrained: bool = True
-    ):
-        super().__init__()
-
-        if backbone == 'resnet50':
-            # Load pretrained RetinaNet
-            self.model = torchvision.models.detection.retinanet_resnet50_fpn(
-                pretrained=pretrained,
-                num_classes=num_classes
-            )
-        else:
-            raise ValueError(f"Unsupported backbone: {backbone}")
-
-    def forward(self, images, targets=None):
-        if self.training and targets is None:
-            raise ValueError("In training mode, targets should be passed")
-
-        return self.model(images, targets)
-
-
-def non_max_suppression(
-    predictions: List[Dict],
-    iou_threshold: float = 0.5,
-    score_threshold: float = 0.5
-) -> List[Dict]:
-    """
-    Apply Non-Maximum Suppression to predictions
-
-    Args:
-        predictions: List of prediction dictionaries
-        iou_threshold: IoU threshold for NMS
-        score_threshold: Score threshold for filtering
-
-    Returns:
-        Filtered predictions
-    """
-    filtered_predictions = []
-
-    for pred in predictions:
-        # Filter by score threshold
-        keep_mask = pred['scores'] > score_threshold
-
-        boxes = pred['boxes'][keep_mask]
-        scores = pred['scores'][keep_mask]
-        labels = pred['labels'][keep_mask]
-
-        # Apply NMS
-        keep_indices = torchvision.ops.nms(boxes, scores, iou_threshold)
-
-        filtered_predictions.append({
-            'boxes': boxes[keep_indices],
-            'scores': scores[keep_indices],
-            'labels': labels[keep_indices]
-        })
-
-    return filtered_predictions

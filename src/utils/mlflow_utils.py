@@ -25,11 +25,17 @@ def setup_mlflow(config: dict):
     mlflow.set_tracking_uri(config['mlflow']['tracking_uri'])
     
     # Create hierarchical experiment name for better organization
-    # Format: taco-detection/{model_type}/{backbone}/experiments
-    experiment_name = (
-        f"taco-detection/{config['model']['name'].lower()}/"
-        f"{config['model']['backbone']}/experiments"
-    )
+    # Format: taco-detection/{model_type}/{backbone or model_size}/experiments
+    model_name = config['model']['name'].lower()
+    
+    # For YOLO models, use model_size; for Faster R-CNN, use backbone
+    if 'yolo' in model_name:
+        model_variant = config['model'].get('model_size', 's')
+        experiment_name = f"taco-detection/{model_name}/{model_name}{model_variant}/experiments"
+    else:
+        backbone = config['model'].get('backbone', 'unknown')
+        experiment_name = f"taco-detection/{model_name}/{backbone}/experiments"
+    
     mlflow.set_experiment(experiment_name)
 
 
@@ -430,3 +436,257 @@ def log_final_training_metrics(best_val_loss: float, total_epochs: int):
         "best_val_loss": best_val_loss,
         "total_epochs": total_epochs
     })
+
+
+# ============================================================================
+# YOLO-SPECIFIC MLFLOW FUNCTIONS
+# ============================================================================
+
+def log_yolo_training_config(config: dict, system_info: dict, dataset_info: dict, 
+                              dataset_version: str, device: str):
+    """
+    Log YOLO-specific training configuration to MLflow.
+    
+    Args:
+        config: Configuration dictionary
+        system_info: System information dictionary
+        dataset_info: Dataset information dictionary
+        dataset_version: Dataset version string
+        device: Device used for training
+    """
+    # Enable system metrics logging
+    mlflow.enable_system_metrics_logging()
+    
+    # Log model configuration
+    model_name = config['model']['name']
+    model_size = config['model']['model_size']
+    
+    mlflow.log_params({
+        'model_name': model_name,
+        'model_size': model_size,
+        'num_classes': config['model']['num_classes'],
+        'epochs': config['training']['num_epochs'],
+        'batch_size': config['data']['batch_size'],
+        'optimizer': config['training']['optimizer']['type'],
+        'learning_rate': config['training']['optimizer']['lr'],
+        'scheduler': config['training']['scheduler']['type'],
+        'image_size': config['data'].get('img_size', 640),
+        'patience': config['training'].get('patience', 100)
+    })
+    
+    # Log optimizer parameters
+    optimizer_config = config['training']['optimizer']
+    if optimizer_config.get('type', '').lower() == 'adamw':
+        mlflow.log_param('weight_decay', optimizer_config.get('weight_decay', 0.0005))
+    elif optimizer_config.get('type', '').lower() == 'sgd':
+        mlflow.log_param('momentum', optimizer_config.get('momentum', 0.937))
+        mlflow.log_param('weight_decay', optimizer_config.get('weight_decay', 0.0005))
+    
+    # Log loss configuration if present
+    if 'loss' in config['training']:
+        loss_config = config['training']['loss']
+        mlflow.set_tag("loss.type", loss_config.get('type', 'yolo_default'))
+        mlflow.set_tag("loss.use_class_weights", loss_config.get('use_class_weights', False))
+        mlflow.set_tag("loss.class_weight_method", loss_config.get('class_weight_method', 'none'))
+        
+        if 'beta' in loss_config:
+            mlflow.set_tag("loss.beta", loss_config.get('beta'))
+        if 'gamma' in loss_config:
+            mlflow.set_tag("loss.gamma", loss_config.get('gamma'))
+    
+    # Log system information
+    mlflow.log_params({
+        'device': str(device),
+        'cuda_available': torch.cuda.is_available(),
+        'python_version': system_info.get('python_version', 'unknown'),
+        'hostname': system_info.get('hostname', 'unknown')
+    })
+    
+    # Set tags
+    mlflow.set_tag("model.type", "YOLOv11")
+    mlflow.set_tag("model.variant", model_size)
+    mlflow.set_tag("training.framework", "ultralytics")
+    
+    # Register dataset
+    register_dataset_in_mlflow(dataset_info, dataset_version, config)
+
+
+def log_yolo_results(results_dir: Path, config: dict) -> tuple[dict, dict]:
+    """
+    Parse and log YOLO training results to MLflow.
+    
+    Args:
+        results_dir: Path to YOLO results directory
+        config: Configuration dictionary
+        
+    Returns:
+        Tuple of (final_metrics, best_metrics) dictionaries
+    """
+    final_metrics = {}
+    best_metrics = {}
+    
+    # Log results CSV if available
+    results_csv = results_dir / 'results.csv'
+    if not results_csv.exists():
+        print(f"⚠ Warning: Results CSV not found at {results_csv}")
+        return final_metrics, best_metrics
+    
+    import pandas as pd
+    df = pd.read_csv(results_csv)
+    df.columns = df.columns.str.strip()
+    
+    # Log metrics for each epoch
+    for idx, row in df.iterrows():
+        epoch = idx + 1
+        
+        # Log training losses
+        if 'train/box_loss' in row:
+            mlflow.log_metric('train_box_loss', float(row['train/box_loss']), step=epoch)
+        if 'train/cls_loss' in row:
+            mlflow.log_metric('train_cls_loss', float(row['train/cls_loss']), step=epoch)
+        if 'train/dfl_loss' in row:
+            mlflow.log_metric('train_dfl_loss', float(row['train/dfl_loss']), step=epoch)
+        
+        # Calculate and log total train loss
+        if all(k in row for k in ['train/box_loss', 'train/cls_loss', 'train/dfl_loss']):
+            total_train_loss = float(row['train/box_loss']) + float(row['train/cls_loss']) + float(row['train/dfl_loss'])
+            mlflow.log_metric('train_loss', total_train_loss, step=epoch)
+        
+        # Log validation losses
+        if 'val/box_loss' in row:
+            mlflow.log_metric('val_box_loss', float(row['val/box_loss']), step=epoch)
+        if 'val/cls_loss' in row:
+            mlflow.log_metric('val_cls_loss', float(row['val/cls_loss']), step=epoch)
+        if 'val/dfl_loss' in row:
+            mlflow.log_metric('val_dfl_loss', float(row['val/dfl_loss']), step=epoch)
+        
+        # Calculate and log total validation loss
+        if all(k in row for k in ['val/box_loss', 'val/cls_loss', 'val/dfl_loss']):
+            total_val_loss = float(row['val/box_loss']) + float(row['val/cls_loss']) + float(row['val/dfl_loss'])
+            mlflow.log_metric('val_loss', total_val_loss, step=epoch)
+        
+        # Log validation metrics
+        if 'metrics/mAP50(B)' in row:
+            mlflow.log_metric('val_mAP50', float(row['metrics/mAP50(B)']), step=epoch)
+        if 'metrics/mAP50-95(B)' in row:
+            mlflow.log_metric('val_mAP50_95', float(row['metrics/mAP50-95(B)']), step=epoch)
+        if 'metrics/precision(B)' in row:
+            mlflow.log_metric('val_precision', float(row['metrics/precision(B)']), step=epoch)
+        if 'metrics/recall(B)' in row:
+            mlflow.log_metric('val_recall', float(row['metrics/recall(B)']), step=epoch)
+    
+    print(f"✓ Logged {len(df)} epochs of training metrics from results.csv")
+    
+    # Extract final metrics (last epoch)
+    if len(df) > 0:
+        last_row = df.iloc[-1]
+        
+        if 'metrics/mAP50(B)' in last_row:
+            final_metrics['final_mAP50'] = float(last_row['metrics/mAP50(B)'])
+        if 'metrics/mAP50-95(B)' in last_row:
+            final_metrics['final_mAP50_95'] = float(last_row['metrics/mAP50-95(B)'])
+        if 'metrics/precision(B)' in last_row:
+            final_metrics['final_precision'] = float(last_row['metrics/precision(B)'])
+        if 'metrics/recall(B)' in last_row:
+            final_metrics['final_recall'] = float(last_row['metrics/recall(B)'])
+        
+        # Extract best metrics (across all epochs)
+        if 'val/box_loss' in df.columns and 'val/cls_loss' in df.columns and 'val/dfl_loss' in df.columns:
+            df['total_val_loss'] = df['val/box_loss'] + df['val/cls_loss'] + df['val/dfl_loss']
+            best_val_loss = float(df['total_val_loss'].min())
+            best_val_loss_epoch = int(df['total_val_loss'].idxmin()) + 1
+            best_metrics['best_val_loss'] = best_val_loss
+            best_metrics['best_val_loss_epoch'] = best_val_loss_epoch
+            mlflow.log_metric('best_val_loss', best_val_loss)
+            mlflow.set_tag('best_val_loss_epoch', best_val_loss_epoch)
+        
+        if 'metrics/mAP50(B)' in df.columns:
+            best_mAP50 = float(df['metrics/mAP50(B)'].max())
+            best_mAP50_epoch = int(df['metrics/mAP50(B)'].idxmax()) + 1
+            best_metrics['best_mAP50'] = best_mAP50
+            best_metrics['best_mAP50_epoch'] = best_mAP50_epoch
+            mlflow.log_metric('best_mAP50', best_mAP50)
+            mlflow.set_tag('best_mAP50_epoch', best_mAP50_epoch)
+        
+        if 'metrics/mAP50-95(B)' in df.columns:
+            best_mAP50_95 = float(df['metrics/mAP50-95(B)'].max())
+            best_mAP50_95_epoch = int(df['metrics/mAP50-95(B)'].idxmax()) + 1
+            best_metrics['best_mAP50_95'] = best_mAP50_95
+            best_metrics['best_mAP50_95_epoch'] = best_mAP50_95_epoch
+            mlflow.log_metric('best_mAP50_95', best_mAP50_95)
+            mlflow.set_tag('best_mAP50_95_epoch', best_mAP50_95_epoch)
+        
+        # Log final metrics
+        for key, value in final_metrics.items():
+            mlflow.log_metric(key, value)
+    
+    return final_metrics, best_metrics
+
+
+def log_yolo_artifacts(results_dir: Path):
+    """
+    Log YOLO training artifacts (weights, plots, etc.) to MLflow.
+    
+    Args:
+        results_dir: Path to YOLO results directory
+    """
+    # Log model weights
+    best_weights = results_dir / 'weights' / 'best.pt'
+    if best_weights.exists():
+        mlflow.log_artifact(str(best_weights), artifact_path="model")
+        print(f"✓ Logged best model weights: {best_weights.name}")
+    
+    last_weights = results_dir / 'weights' / 'last.pt'
+    if last_weights.exists():
+        mlflow.log_artifact(str(last_weights), artifact_path="model")
+        print(f"✓ Logged last model weights: {last_weights.name}")
+    
+    # Log training plots
+    plot_count = 0
+    for plot_file in results_dir.glob('*.png'):
+        mlflow.log_artifact(str(plot_file), artifact_path="plots")
+        plot_count += 1
+    
+    if plot_count > 0:
+        print(f"✓ Logged {plot_count} training plots")
+    
+    # Log confusion matrix if available
+    confusion_matrix = results_dir / 'confusion_matrix.png'
+    if confusion_matrix.exists():
+        print(f"✓ Logged confusion matrix")
+
+
+def log_yolo_training_summary(results_dir: Path, config: dict, 
+                               final_metrics: dict, best_metrics: dict):
+    """
+    Log final YOLO training summary tags to MLflow.
+    
+    Args:
+        results_dir: Path to YOLO results directory
+        config: Configuration dictionary
+        final_metrics: Final metrics dictionary
+        best_metrics: Best metrics dictionary
+    """
+    model_size = config['model']['model_size']
+    patience = config['training'].get('patience', 100)
+    
+    # Model size to parameters mapping (approximate)
+    model_params = {
+        'n': '2.6M',
+        's': '9.4M',
+        'm': '20.5M',
+        'l': '25.3M',
+        'x': '68.2M'
+    }
+    
+    mlflow.set_tag("model.parameters", model_params.get(model_size, 'unknown'))
+    mlflow.set_tag("training.patience", patience)
+    
+    # Log total epochs trained
+    results_csv = results_dir / 'results.csv'
+    if results_csv.exists():
+        import pandas as pd
+        df = pd.read_csv(results_csv)
+        total_epochs = len(df)
+        mlflow.set_tag("training.total_epochs", total_epochs)
+        mlflow.log_metric("total_epochs", total_epochs)

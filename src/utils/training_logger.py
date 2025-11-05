@@ -24,7 +24,7 @@ class TrainingLogger:
         print(f"{'-'*width}")
     
     @staticmethod
-    def print_setup_info(config: dict, system_info: dict, dataset_info: dict):
+    def print_setup_info(config: dict, system_info: dict, dataset_info: dict, loss_info: dict = None):
         """Print compact setup information."""
         TrainingLogger.print_section("TRAINING SETUP")
         
@@ -38,6 +38,15 @@ class TrainingLogger:
         print(f"Batch Size: {config['data']['batch_size']}")
         print(f"Optimizer:  {config['training']['optimizer']['type'].upper()} (lr={config['training']['optimizer']['lr']})")
         print(f"Scheduler:  {config['training']['scheduler']['type']}")
+        
+        # Loss function info
+        if loss_info:
+            print(f"\nLoss Function:")
+            print(f"  Type:      {loss_info.get('type', 'standard').upper()}")
+            if loss_info.get('use_class_weights'):
+                print(f"  Weighting: {loss_info.get('weight_method', 'N/A')}")
+                print(f"  Gamma:     {loss_info.get('gamma', 'N/A')}")
+                print(f"  Beta:      {loss_info.get('beta', 'N/A')}")
         
         # Hardware
         gpu_name = system_info.get('gpu_name', 'CPU only')
@@ -63,7 +72,7 @@ class TrainingLogger:
                            learning_rate: float, best_model: bool = False,
                            patience_info: str = None):
         """Print compact epoch summary."""
-        status = "✓ BEST" if best_model else ""
+        status = " BEST" if best_model else ""
         print(f"\nEpoch {epoch}: Loss(train={train_loss:.4f}, val={val_loss:.4f}) "
               f"LR={learning_rate:.2e} {status}")
         
