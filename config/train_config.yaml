@@ -2,15 +2,20 @@
 
 # Experiment settings
 experiment:
-  name: "taco_detection_baseline"
+  name: "taco_detection_mobilenet_cb_focal_full_aug"
   tags:
-    - "no_augmentation"
-    - "modern_config"
+    - "full_augmentation"
+    - "geometric_aug"
+    - "photometric_aug"
+    - "blur_noise_aug"
+    - "cutout_aug"
+    - "cb_focal_loss"
+    - "class_weights"
     - "adamw_optimizer"
     - "cosine_scheduler"
     - "faster_rcnn"
-    - "resnet50"
-  description: "Faster R-CNN baseline WITHOUT augmentation (only letterbox) for TACO object detection"
+    - "mobilenet_v3_large"
+  description: "Faster R-CNN with MobileNetV3-Large backbone for TACO dataset with full augmentation pipeline"
 
 # Data settings
 data:
@@ -28,46 +33,84 @@ data:
     bbox_format: "pascal_voc"
   
   # Augmentation parameters for train set
-  # BASELINE: All augmentations disabled (set to 0.0)
-  # Enable gradually after baseline training
+  # Configuración ajustada basada en características del dataset TACO:
+  # - Imágenes con alta variabilidad en brillo (22-208), contraste (15-83) y ruido (2-14236)
+  # - Objetos de basura pueden aparecer en cualquier orientación
+  # - Escenas al aire libre con diferentes condiciones de iluminación
   augmentation:
     # Geometric augmentations
-    horizontal_flip_p: 0.0
-    vertical_flip_p: 0.0
-    shift_scale_rotate_p: 0.0
-    shift_limit: 0.0
-    scale_limit: 0.0
-    rotate_limit: 0
+    # Basura puede estar en cualquier orientación en ambientes naturales
+    horizontal_flip_p: 0.5      # 50% - común en objetos de basura
+    vertical_flip_p: 0.3        # 30% - menos común pero posible
+    shift_scale_rotate_p: 0.7   # 70% - importante para objetos en diferentes posiciones
+    shift_limit: 0.1            # ±10% - evita perder objetos en bordes
+    scale_limit: 0.6            # ±20% - objetos a diferentes distancias
+    rotate_limit: 90            # ±20° - basura puede estar en varias orientaciones
     
     # Photometric augmentations
-    brightness_contrast_p: 0.0
-    brightness_limit: 0.0
-    contrast_limit: 0.0
+    # Dataset tiene gran variabilidad: brillo (22-208), contraste (15-83)
+    brightness_contrast_p: 0.6  # 60% - crítico para robustez
+    brightness_limit: 0.25      # ±25% - cubre rango del dataset
+    contrast_limit: 0.25        # ±25% - importante variación observada
     
-    hue_saturation_p: 0.0
-    hue_shift_limit: 0
-    sat_shift_limit: 0
-    val_shift_limit: 0
+    hue_saturation_p: 0.4       # 40% - diferentes condiciones de luz
+    hue_shift_limit: 15         # ±15 - variaciones de color razonables
+    sat_shift_limit: 25         # ±25 - saturación variable en exteriores
+    val_shift_limit: 20         # ±20 - valor de brillo
     
     # Blur augmentations
-    blur_p: 0.0
-    blur_limit: 3
+    # Dataset tiene ruido variable (promedio 1169, max 14236)
+    blur_p: 0.3                 # 30% - algunas imágenes son borrosas
+    blur_limit: 5               # Max 5px - blur moderado
     
     # Noise augmentations
-    noise_p: 0.0
+    # Alto nivel de ruido en algunas imágenes del dataset
+    noise_p: 0.25               # 25% - simula ruido de cámara
     
     # Cutout/dropout augmentations
-    cutout_p: 0.0
-    cutout_max_holes: 0
-    cutout_max_height: 0
-    cutout_max_width: 0
+    # Ayuda con oclusiones parciales (basura puede estar parcialmente cubierta)
+    cutout_p: 0.2               # 20% - oclusión moderada
+    cutout_max_holes: 3         # Max 3 huecos
+    cutout_max_height: 40       # 40px - pequeños huecos
+    cutout_max_width: 40        # 40px - pequeños huecos
 
 # Model settings
+# ============================================================
+# ARQUITECTURAS SOPORTADAS:
+# ============================================================
+#
+# 1. Faster R-CNN (Two-stage detector):
+#    name: "FasterRCNN"
+#    Backbones disponibles:
+#      - 'resnet50': ResNet50-FPN (baseline, robusto)
+#      - 'mobilenet_v3_large': MobileNetV3-Large-FPN (moderno, eficiente, recomendado)
+#      - 'mobilenet_v3_large_320': MobileNetV3-Large-320-FPN (más rápido)
+#    Soporte completo: CB Focal Loss, class weights, custom losses
+#
+# 2. YOLOv11 (One-stage detector, más rápido):
+#    name: "YOLOv11"
+#    Model sizes disponibles:
+#      - 'n': nano (más rápido, menor precisión)
+#      - 's': small (balance recomendado)
+#      - 'm': medium (más preciso)
+#      - 'l': large (muy preciso, más lento)
+#      - 'x': extra large (máxima precisión)
+#    Soporte: class weights, optimizers personalizados
+#    Nota: Custom losses aproximadas mediante parámetros de YOLO
+#
+# ============================================================
 model:
-  name: "FasterRCNN"
-  backbone: "resnet50"
+  name: "FasterRCNN"  # Opciones: "FasterRCNN" o "YOLOv11"
+  
+  # Para Faster R-CNN:
+  backbone: "mobilenet_v3_large"
+  
+  # Para YOLOv11 (descomentarname: "YOLOv11" arriba):
+  # model_size: "s"  # Opciones: 'n', 's', 'm', 'l', 'x'
+  
   pretrained: true
-  num_classes: 61  # 60 classes + 1 background
+  num_classes: 61  # 60 classes + 1 background (para Faster R-CNN)
+                   # 60 classes sin background (para YOLO)
 
 # Training settings
 training:
@@ -88,6 +131,25 @@ training:
     warmup_epochs: 5                 # Linear warmup for first 5 epochs
     min_lr: 0.000001                 # Minimum learning rate at end (1e-6)
     # Cosine annealing will smoothly reduce LR from initial to min_lr
+  
+  # Loss function for imbalanced classes
+  loss:
+    type: "cb_focal"                 # Options: 'ce' (CrossEntropy), 'focal', 'cb_focal' (Class-Balanced Focal)
+    
+    # Class weighting strategy
+    use_class_weights: true   # Enable class weighting
+    class_weight_method: "effective"  # Options: 'inverse', 'effective', 'sqrt'
+    
+    # Focal Loss parameters (applies to 'focal' and 'cb_focal')
+    gamma: 2.0                 # Focusing parameter (0 = CE, 2 = standard, higher = more focus on hard)
+    
+    # Class-Balanced Loss parameters (applies to 'cb_focal')
+    beta: 0.9999               # Effective number beta (0.999-0.9999 for TACO)
+                              # Higher beta = more emphasis on rare classes
+    
+    # Bounding box loss
+    bbox_loss_weight: 1.0      # Weight for bbox regression loss
+    use_weighted_bbox: true   # Apply class weights to bbox loss
   
   # Mixed Precision Training (for faster training and less memory)
   use_amp: true                # Automatic Mixed Precision (FP16)
