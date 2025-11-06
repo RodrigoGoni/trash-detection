@@ -45,6 +45,8 @@ def parse_args():
                        help='IoU threshold for deciding bbox occlusion (default: 0.3)')
     parser.add_argument('--minority-threshold', type=int, default=50,
                        help='Classes with fewer annotations are considered minority (default: 50)')
+    parser.add_argument('--min-class-samples', type=int, default=0,
+                       help='Minimum number of samples required per class (classes below this threshold will be removed, default: 0 = no filtering)')
     return parser.parse_args()
 
 
@@ -69,6 +71,87 @@ def filter_images_by_annotations(data: dict, min_annotations: int = 1) -> tuple:
     
     print(f"  Filtered: {len(data['images'])} -> {len(filtered)} images")
     return valid_ids, filtered
+
+
+def filter_classes_by_sample_count(data: dict, min_samples: int) -> dict:
+    """
+    Remove classes with fewer than min_samples annotations from the dataset.
+    
+    Args:
+        data: COCO format dataset dictionary
+        min_samples: Minimum number of annotations required per class
+    
+    Returns:
+        Filtered dataset with removed classes and their annotations
+    """
+    if min_samples <= 0:
+        return data
+    
+    print("\n" + "="*60)
+    print(f"FILTERING CLASSES (min_samples={min_samples})")
+    print("="*60)
+    
+    # Count annotations per class
+    class_counts = Counter(ann['category_id'] for ann in data['annotations'])
+    
+    # Identify classes to remove
+    classes_to_remove = {cat_id for cat_id, count in class_counts.items() if count < min_samples}
+    classes_to_keep = {cat_id for cat_id in class_counts.keys() if cat_id not in classes_to_remove}
+    
+    if not classes_to_remove:
+        print(f"  ✓ All classes meet minimum sample requirement ({min_samples})")
+        return data
+    
+    # Print removed classes
+    cat_id_to_name = {cat['id']: cat['name'] for cat in data['categories']}
+    print(f"\n  Removing {len(classes_to_remove)} classes with < {min_samples} samples:")
+    for cat_id in sorted(classes_to_remove):
+        cat_name = cat_id_to_name.get(cat_id, f"Unknown-{cat_id}")
+        count = class_counts[cat_id]
+        print(f"    - {cat_name} (ID: {cat_id}): {count} samples")
+    
+    # Filter annotations
+    original_ann_count = len(data['annotations'])
+    filtered_annotations = [ann for ann in data['annotations'] 
+                           if ann['category_id'] in classes_to_keep]
+    
+    # Filter categories
+    filtered_categories = [cat for cat in data['categories'] 
+                          if cat['id'] in classes_to_keep]
+    
+    # Remap category IDs to be sequential (0, 1, 2, ...)
+    old_to_new_id = {old_id: new_id for new_id, old_id in 
+                     enumerate(sorted(classes_to_keep))}
+    
+    # Update category IDs in categories list
+    for cat in filtered_categories:
+        cat['id'] = old_to_new_id[cat['id']]
+    
+    # Update category IDs in annotations
+    for ann in filtered_annotations:
+        ann['category_id'] = old_to_new_id[ann['category_id']]
+    
+    # Get images that still have annotations
+    images_with_annotations = {ann['image_id'] for ann in filtered_annotations}
+    filtered_images = [img for img in data['images'] 
+                      if img['id'] in images_with_annotations]
+    
+    # Create filtered dataset
+    filtered_data = {
+        'info': data.get('info', {}),
+        'licenses': data.get('licenses', []),
+        'categories': filtered_categories,
+        'images': filtered_images,
+        'annotations': filtered_annotations
+    }
+    
+    print(f"\n  Summary:")
+    print(f"    Categories: {len(data['categories'])} -> {len(filtered_categories)}")
+    print(f"    Annotations: {original_ann_count} -> {len(filtered_annotations)}")
+    print(f"    Images: {len(data['images'])} -> {len(filtered_images)}")
+    print(f"    Remaining classes: {len(filtered_categories)}")
+    
+    return filtered_data
 
 
 def analyze_class_distribution(data: dict) -> Dict:
@@ -318,7 +401,7 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
                    test_split: float, seed: int, min_annotations: int = 1,
                    stratify: bool = True, minority_threshold: int = 50,
                    duplicate_multi_label: bool = False, iou_threshold: float = 0.3,
-                   version: str = None, overwrite: bool = False):
+                   version: str = None, overwrite: bool = False, min_class_samples: int = 0):
     """Prepare TACO dataset by splitting into train/val/test sets with stratification."""
     raw_path = Path(raw_dir)
     
@@ -380,6 +463,11 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
         raise FileNotFoundError(f"Annotations not found: {annotations_file}")
     
     data = load_coco_annotations(annotations_file)
+    
+    # Filter classes with insufficient samples (if enabled)
+    if min_class_samples > 0:
+        data = filter_classes_by_sample_count(data, min_class_samples)
+    
     valid_image_ids, filtered_images = filter_images_by_annotations(data, min_annotations)
     
     # Analyze class distribution
@@ -473,7 +561,8 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
             'stratify': stratify,
             'minority_threshold': minority_threshold,
             'duplicate_multi_label': duplicate_multi_label,
-            'iou_threshold': iou_threshold
+            'iou_threshold': iou_threshold,
+            'min_class_samples': min_class_samples
         }
     }
     with open(processed_path / 'dataset_stats.json', 'w') as f:
@@ -488,6 +577,9 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
     print(f"Train: {stats['train']['images']} images ({stats['train']['annotations']} annotations)")
     print(f"Val:   {stats['val']['images']} images ({stats['val']['annotations']} annotations)")
     print(f"Test:  {stats['test']['images']} images ({stats['test']['annotations']} annotations)")
+    print(f"Total classes: {len(data['categories'])}")
+    if min_class_samples > 0:
+        print(f"Min class samples: {min_class_samples}")
     print(f"Minority classes: {len(minority_classes)} (< {minority_threshold} annotations)")
     print(f"Stratified split: {stratify}")
     if not overwrite:
@@ -510,7 +602,8 @@ def main():
         duplicate_multi_label=args.duplicate_multi_label,
         iou_threshold=args.iou_threshold,
         version=args.version,
-        overwrite=args.overwrite
+        overwrite=args.overwrite,
+        min_class_samples=args.min_class_samples
     )
 
 

@@ -5,7 +5,7 @@
 
 # Experiment settings
 experiment:
-  name: "taco_detection_yolo11m_baseline"
+  name: "taco_detection_yolo11l_23c_aug_p100"
   tags:
     - "yolo11"
     - "yolo11m"
@@ -25,13 +25,13 @@ data:
 # Model settings
 model:
   name: "YOLOv11"
-  model_size: "m"  # Options: 'n', 's', 'm', 'l', 'x'
+  model_size: "l"  # Options: 'n', 's', 'm', 'l', 'x'
   pretrained: true
-  num_classes: 60  # 60 classes (no background for YOLO)
+  num_classes: 23  # 60 classes (no background for YOLO)
 
 # Training settings (basic parameters)
 training:
-  num_epochs: 5
+  num_epochs: 600
   device: "cuda"
 
 # ============================================================
@@ -43,7 +43,7 @@ yolo_training:
   # ============================================================
   # TRAINING BEHAVIOR
   # ============================================================
-  dropout: 0.0                 # Dropout rate for regularization (0.0-0.5)
+  dropout: 0.2                 # Dropout rate for regularization (0.0-0.5)
   val: true                    # Enable validation during training
   plots: true                  # Generate and save training plots
   save: true                   # Save checkpoints
@@ -61,14 +61,14 @@ yolo_training:
   # LEARNING RATE SCHEDULING
   # ============================================================
   cos_lr: true                 # Use cosine learning rate scheduler
-  warmup_epochs: 3.0           # Number of warmup epochs
+  warmup_epochs: 15.0           # Number of warmup epochs
   warmup_momentum: 0.8         # Initial momentum during warmup
   warmup_bias_lr: 0.1          # Bias learning rate during warmup
   
   # ============================================================
   # LOSS WEIGHTS
   # ============================================================
-  box: 7.5                     # Box loss weight
+  box: 8.5                     # Box loss weight
   cls: 0.5                     # Classification loss weight
   dfl: 1.5                     # Distribution focal loss weight
   
@@ -80,11 +80,10 @@ yolo_training:
   single_cls: false            # Treat multi-class as single class
   classes: null                # List of class IDs to train on (null = all classes)
   rect: false                  # Rectangular training (minimum padding strategy)
-  multi_scale: false           # Multi-scale training (+/-50% of imgsz)
   compile: false               # PyTorch 2.x torch.compile (True, False, or mode string)
-  close_mosaic: 10             # Disable mosaic in last N epochs
-  resume: false                # Resume from last checkpoint
-  patience: 10                 # Early stopping patience
+  close_mosaic: 30             # Disable mosaic in last N epochs
+  resume: true                # Resume from last checkpoint
+  patience: 100                 # Early stopping patienc
   
   # ============================================================
   # DATA AUGMENTATION (YOLO-specific)
@@ -93,26 +92,28 @@ yolo_training:
   # durante el entrenamiento. No requieren conversión previa de datos.
   augmentation:
     # Color augmentations
-    hsv_h: 0.0               # HSV Hue augmentation (0.0-1.0)
-    hsv_s: 0.0                # HSV Saturation augmentation (0.0-1.0)
-    hsv_v: 0.0                 # HSV Value augmentation (0.0-1.0)
+    hsv_h: 0.01               # HSV Hue augmentation (0.0-1.0)
+    hsv_s: 0.3                # HSV Saturation augmentation (0.0-1.0)
+    hsv_v: 0.4                 # HSV Value augmentation (0.0-1.0)
     
     # Geometric augmentations
-    degrees: 0.0              # Image rotation (+/- degrees)
-    translate: 0.0             # Image translation (+/- fraction)
-    scale: 0.0                # Image scale (+/- gain)
-    shear: 0.0                 # Image shear (+/- degrees)
-    perspective: 0.0           # Perspective transformation (0.0-0.001)
+    degrees: 45              # Image rotation (+/- degrees)
+    translate: 0.25            # Image translation (+/- fraction)
+    scale: 0.5                # Image scale (+/- gain)
+    shear: 5                 # Image shear (+/- degrees)
+    perspective: 0.0000       # Perspective transformation (0.0-0.001)
     
     # Flip augmentations
-    flipud: 0.0                # Vertical flip probability (0.0-1.0)
-    fliplr: 0.0               # Horizontal flip probability (0.0-1.0)
+    flipud: 0.5                # Vertical flip probability (0.0-1.0)
+    fliplr: 0.5               # Horizontal flip probability (0.0-1.0)
     
     # Advanced augmentations
-    mosaic: 0.0                # Mosaic augmentation probability (0.0-1.0)
-    mixup: 0.0                 # Mixup augmentation probability (0.0-1.0)
-    copy_paste: 0.0            # Copy-paste augmentation probability (0.0-1.0)
-
+    mosaic: 0.1               # Mosaic augmentation probability (0.0-1.0)
+    mixup: 0.02                 # Mixup augmentation probability (0.0-1.0)
+    copy_paste: 0.1            # Copy-paste augmentation probability (0.0-1.0)
+    cutmix: 0.1
+    erasing: 0.3
+    
 # MLflow settings
 mlflow:
   tracking_uri: "./mlruns"
