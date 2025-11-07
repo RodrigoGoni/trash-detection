@@ -51,3 +51,4 @@ onnxruntime>=1.15.0
 prometheus-client>=0.17.0
 # Dataset download utility
 kagglehub
+ultralytics>=8.0.0

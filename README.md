@@ -1,133 +1,119 @@
-# Trash Detection - Deep Learning Computer Vision Project
+# Detección de basura - proyecto de visión por computadora con aprendizaje profundo
 
-A comprehensive deep learning project for **object detection of trash** using the TACO dataset, with integrated MLOps practices for experiment tracking, model versioning, and deployment.
+Un proyecto de vision por computadora para la detección de objetos de basura utilizando el conjunto de datos TACO, con prácticas MLOps integradas para seguimiento de experimentos, versionado de modelos y despliegue.
 
-## Project Overview
+## Descripción general del proyecto
 
-This project implements a complete pipeline for trash detection using deep learning, including:
-- **Object Detection** on TACO (Trash Annotations in Context) dataset
-- **60 categories** of trash items with bounding box annotations
-- **1500 images** with 4784 annotations (split: 70% train, 15% val, 15% test)
-- Advanced preprocessing pipeline with Albumentations (letterboxing, augmentations)
-- Multiple model architectures for object detection
-- Data preprocessing and augmentation specifically for detection tasks
-- Experiment tracking with MLflow
-- Model and data versioning with DVC
-- REST API for model serving
-- Docker containerization
-- CI/CD pipeline with GitHub Actions
+Este proyecto implementa un sistema completo para la detección de basura utilizando tecnicas y modelos de vision artificial, incluyendo:
+- Detección de objetos usando el conjunto de datos *Taco Trash Dataset* 
+- 60 categorías de basura con anotaciones de cajas
+- 1500 imágenes con 4784 anotaciones (división: 70% entrenamiento, 15% validación, 15% prueba)
+- Sistema avanzado de preprocesamiento con Albumentations
+- Múltiples arquitecturas de modelos para detección de objetos
+- Preprocesamiento y aumento de datos específico para tareas de detección
+- Seguimiento de experimentos con MLflow
+- Contenedorización con Docker
 
-## Project Structure
+## Estructura del Proyecto
 
 ```
 trash-detection/
-├── data/                          # Data directory
-│   ├── raw/                       # Raw, immutable data
-│   ├── processed/                 # Processed and split data
-│   ├── interim/                   # Intermediate transformed data
-│   └── external/                  # External data sources
+├── data/                        # Directorio de datos
+│   ├── raw/                     # Datos sin procesar
+│   ├── processed/               # Datos procesados y divididos
+│   ├── interim/                 # Datos transformados intermedios
+│   └── external/                # Fuentes de datos externos
 │
-├── notebooks/                     # Jupyter notebooks
-│   ├── 01_exploration/           # Data exploration
-│   ├── 02_preprocessing/         # Preprocessing experiments
-│   └── 03_modeling/              # Model experiments
+├── notebooks/                   # Notebooks de jupyter
+│   ├── 01_exploration/          # EDA
+│   ├── 02_preprocessing/        # Experimentos de preprocesamiento
+│   └── 03_evalution/            # Evaluaciones
 │
-├── src/                          # Source code
-│   ├── data/                     # Data loading and processing
-│   │   ├── dataloader.py        # Dataset and DataLoader classes
-│   │   ├── preprocessing.py     # Image preprocessing utilities
-│   │   └── augmentation.py      # Data augmentation transforms
+├── src/                         # Código fuente
+│   ├── data/                    # Carga y procesamiento de datos
+│   │   ├── dataloader.py        # Clases Dataset y DataLoader
+│   │   ├── preprocessing.py     # Utilidades de preprocesamiento
+│   │   └── augmentation.py      # Transformaciones
 │   │
-│   ├── models/                   # Model architectures
-│   │   ├── backbone.py          # Backbone networks
-│   │   ├── classifier.py        # Classification models
-│   │   ├── detector.py          # Object detection models
-│   │   ├── train.py             # Training utilities
-│   │   └── evaluate.py          # Evaluation utilities
+│   ├── models/                  # Modelos
+│   │   ├── backbone.py          # Backbones 
+│   │   ├── detector.py          # Modelos de detección
+│   │   ├── train.py             # Utilidades de entrenamiento
+│   │   └── evaluate.py          # Utilidades de evaluación
 │   │
-│   ├── features/                 # Feature engineering
-│   ├── visualization/            # Visualization utilities
-│   └── utils/                    # Utility functions
-│       ├── mlflow_utils.py      # MLflow tracking
-│       └── dvc_utils.py         # DVC utilities
+│   ├── features/                # Ingeniería de características
+│   ├── visualization/           # Utilidades de visualización
+│   └── utils/                   # Funciones utilitarias
+│       └── mlflow_utils.py      # Seguimiento MLflow
 │
-├── config/                       # Configuration files
-│   └── train_config.yaml        # Training configuration
+├── config/                      # Archivos de configuración
+│   └── train_config.yaml        # Configuración de entrenamiento
 │
-├── models/                       # Trained models
-│   ├── checkpoints/             # Training checkpoints
-│   └── production/              # Production models
+├── models/                      # Modelos entrenados
+│   ├── checkpoints/             # Guardado de pesos sinapticos
+│   └── production/              # Modelos de producción
 │
-├── experiments/                  # Experiment logs and results
+├── experiments/                 # Registros y resultados
 │
-├── deployment/                   # Deployment files
-│   ├── api/                     # FastAPI application
-│   │   └── app.py               # API server
-│   └── docker/                  # Docker files
-│       ├── Dockerfile           # Docker image definition
-│       └── docker-compose.yml   # Multi-container setup
+├── scripts/                     
+│   ├── prepare_data.py          # Preparación de datos
+│   ├── train_model.py           # Script de entrenamiento
+│   └── evaluate_model.py        # Script de evaluación
 │
-├── scripts/                      # Utility scripts
-│   ├── prepare_data.py          # Data preparation
-│   ├── train_model.py           # Training script
-│   └── evaluate_model.py        # Evaluation script
+├── .github/workflows/           # GitHub Actions
+│   └── ci-cd.yml                # Pipeline CI/CD
 │
-├── tests/                        # Unit tests
-│
-├── .github/workflows/            # GitHub Actions
-│   └── ci-cd.yml                # CI/CD pipeline
-│
-├── requirements.txt              # Python dependencies
-├── environment.yml               # Conda environment
-├── setup.py                      # Package setup
-└── README.md                     # This file
+├── requirements.txt             # Dependencias Python
+├── environment.yml              # Entorno Conda
+├── setup.py                     # Configuración del paquete
+└── README.md                    
 ```
 
-## Getting Started
+## Inicio
 
-### Prerequisites
+### Requisitos Previos
 
 - Python 3.10+
-- CUDA-capable GPU (optional, for training)
-- Docker (optional, for deployment)
+- GPU compatible con CUDA (opcional, para entrenamiento)
+- Docker (opcional, para despliegue)
 
-### Installation
+### Instalación
 
-1. Clone the repository:
+1. Clonar el repositorio:
 ```bash
 git clone https://github.com/RodrigoGoni/trash-detection.git
 cd trash-detection
 ```
 
-2. Create a virtual environment:
+2. Crear un entorno virtual:
 ```bash
-# Using conda
+# Usando conda
 conda env create -f environment.yml
 conda activate trash-detection
 
-# Or using venv
+# O usando venv
 python3 -m venv venv
 source venv/bin/activate  # Linux/Mac
-# or
+# o
 venv\Scripts\activate  # Windows
 
 pip install -r requirements.txt
 ```
 
-3. Install the package in development mode:
+3. Instalar el paquete en modo desarrollo:
 ```bash
 pip install -e .
 ```
 
-4. Set up environment variables:
+4. Configurar variables de entorno:
 ```bash
 cp .env.example .env
-# Edit .env with your configuration
+# Editar .env con tu configuración
 ```
 
-### Data Preparation
+### Preparación de Datos
 
-1. Place your raw data in `data/raw/` following this structure:
+1. Coloca tus datos sin procesar en `data/raw/` siguiendo esta estructura:
 ```
 data/raw/
     ├── class1/
@@ -138,7 +124,7 @@ data/raw/
     └── ...
 ```
 
-2. Prepare the dataset:
+2. Preparar el conjunto de datos:
 ```bash
 python scripts/prepare_data.py \
     --raw-dir data/raw \
@@ -147,19 +133,11 @@ python scripts/prepare_data.py \
     --test-split 0.1
 ```
 
-3. Version the data with DVC:
-```bash
-dvc init
-dvc add data/processed
-git add data/processed.dvc .gitignore
-git commit -m "Add processed data"
-```
+## Entrenamiento
 
-## 🎓 Training
+### Configurar Entrenamiento
 
-### Configure Training
-
-Edit `config/train_config.yaml` to set your training parameters:
+Edita `config/train_config.yaml` para establecer tus parámetros de entrenamiento:
 ```yaml
 model:
   backbone: "resnet50"
@@ -170,18 +148,7 @@ training:
   batch_size: 32
   lr: 0.001
 ```
-
-### Start MLflow Tracking Server
-
-```bash
-mlflow server \
-    --backend-store-uri sqlite:///mlflow.db \
-    --default-artifact-root ./mlruns \
-    --host 0.0.0.0 \
-    --port 5000
-```
-
-### Train the Model
+### Entrenar el Modelo
 
 ```bash
 python scripts/train_model.py \
@@ -190,14 +157,14 @@ python scripts/train_model.py \
     --device cuda
 ```
 
-### Monitor Training
+### Monitorear el Entrenamiento
 
-- MLflow UI: http://localhost:5000
-- View experiments, metrics, and artifacts
+- Interfaz MLflow: http://localhost:5000
+- Ver experimentos, métricas y artefactos
 
-## Evaluation
+## Evaluación
 
-Evaluate the trained model:
+Evaluar el modelo entrenado:
 
 ```bash
 python scripts/evaluate_model.py \
@@ -207,158 +174,65 @@ python scripts/evaluate_model.py \
     --output-dir experiments
 ```
 
-Results will be saved in `experiments/`:
-- `evaluation_metrics.json`: Overall metrics
-- `classification_report.json`: Per-class metrics
-- `confusion_matrix.png`: Confusion matrix visualization
+Los resultados se guardarán en `experiments/`:
+- `evaluation_metrics.json`: Métricas generales
+- `classification_report.json`: Métricas por clase
+- `confusion_matrix.png`: Visualización de la matriz de confusión
 
-## Deployment
 
-### Local API Server
+## Flujo de MLOps
 
-Run the FastAPI server locally:
+### Seguimiento de Experimentos (MLflow)
 
-```bash
-cd deployment/api
-uvicorn app:app --host 0.0.0.0 --port 8000 --reload
-```
+Todos los entrenamientos se registran automáticamente en MLflow:
+- Hiperparámetros
+- Métricas (pérdida, precisión)
+- Artefactos del modelo
+- Configuración de entrenamiento
 
-API documentation: http://localhost:8000/docs
+## Arquitecturas de Modelos
 
-### Docker Deployment
-
-Build and run with Docker:
-
-```bash
-docker build -t trash-detection -f deployment/docker/Dockerfile .
-docker run -p 8000:8000 trash-detection
-```
-
-Or use Docker Compose for the full stack:
-
-```bash
-cd deployment/docker
-docker-compose up -d
-```
-
-Services:
-- API: http://localhost:8000
-- MLflow: http://localhost:5000
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000
-
-### API Usage
-
-```python
-import requests
-
-# Make prediction
-url = "http://localhost:8000/predict"
-files = {"file": open("image.jpg", "rb")}
-response = requests.post(url, files=files)
-print(response.json())
-```
-
-## MLOps Workflow
-
-### Experiment Tracking (MLflow)
-
-All training runs are automatically logged to MLflow:
-- Hyperparameters
-- Metrics (loss, accuracy)
-- Model artifacts
-- Training configuration
-
-### Data Versioning (DVC)
-
-Track data and model versions:
-
-```bash
-# Add data to DVC
-dvc add data/processed
-
-# Add remote storage
-dvc remote add -d myremote s3://my-bucket/dvc-storage
-
-# Push data
-dvc push
-
-# Pull data
-dvc pull
-```
-
-### CI/CD Pipeline
-
-The GitHub Actions workflow automatically:
-- Runs tests on pull requests
-- Builds and pushes Docker images
-- Can trigger model training
-- Versions models with DVC
-
-## Model Architectures
-
-Supported backbones:
+Backbones soportados:
 - ResNet (50, 101)
 - EfficientNet (B0, B3)
 - MobileNetV3
 - Vision Transformer (ViT)
 - ConvNeXt
 
-Supported tasks:
-- Image Classification
-- Multi-label Classification
-- Object Detection (Faster R-CNN, RetinaNet, YOLOv5)
+Tareas soportadas:
+- Detección de Objetos (Faster R-CNN, RetinaNet, YOLOv5)
 
-## Testing
 
-Run tests:
+## Documentación
 
-```bash
-pytest tests/
-```
+Para documentación más detallada, ver:
+- [Guía de Procesamiento de Datos](docs/data_processing.md)
+- [Guía de Entrenamiento de Modelos](docs/training.md)
+- [Guía de Despliegue](docs/deployment.md)
+- [Referencia de la API](docs/api_reference.md)
 
-With coverage:
+## Contribuir
 
-```bash
-pytest tests/ --cov=src --cov-report=html
-```
+1. Hacer fork del repositorio
+2. Crear una rama para la función (`git checkout -b feature/nueva-funcion`)
+3. Hacer commit de los cambios (`git commit -m 'Agregar nueva función'`)
+4. Subir a la rama (`git push origin feature/nueva-funcion`)
+5. Abrir un Pull Request
 
-## Documentation
+## Licencia
 
-For more detailed documentation, see:
-- [Data Processing Guide](docs/data_processing.md)
-- [Model Training Guide](docs/training.md)
-- [Deployment Guide](docs/deployment.md)
-- [API Reference](docs/api_reference.md)
+Este proyecto está licenciado bajo la Licencia MIT - ver el archivo [LICENSE](LICENSE) para más detalles.
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- PyTorch and torchvision teams
-- MLflow and DVC communities
-- FastAPI framework
-- Open source computer vision community
-
-## Contact
+## Contacto
 
 Rodrigo - [@RodrigoGoni](https://github.com/RodrigoGoni)
+Tomas - [@tomasctg](https://github.com/tomasctg)
 
-Project Link: [https://github.com/RodrigoGoni/trash-detection](https://github.com/RodrigoGoni/trash-detection)
+Enlace del Proyecto: [https://github.com/RodrigoGoni/trash-detection](https://github.com/RodrigoGoni/trash-detection)
 
 ---
 
-## 🎯 Handling Class Imbalance
+## Handling Class Imbalance
 
 El dataset TACO presenta un **desbalanceo extremo de clases** con 36 clases minoritarias (<50 anotaciones) y algunas con solo 1-2 muestras. Para manejar esto, el proyecto implementa:
 
@@ -389,7 +263,7 @@ Implementado en `src/training/losses.py`:
    - Paper: "Focal Loss for Dense Object Detection" (Lin et al., ICCV 2017)
    - `gamma=2.0` (recomendado)
 
-2. **Class-Balanced Focal Loss** ⭐ (recomendado): Combina Focal Loss con effective number weighting
+2. **Class-Balanced Focal Loss** (recomendado): Combina Focal Loss con effective number weighting
    - Paper: "Class-Balanced Loss Based on Effective Number of Samples" (Cui et al., CVPR 2019)
    - `beta=0.9999` para TACO dataset
 
