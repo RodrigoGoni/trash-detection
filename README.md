@@ -315,3 +315,64 @@ Este script valida:
 ---
 
 El stratify SÍ funcionó bien para las clases con suficientes muestras. El problema es el desbalanceo extremo inherente del dataset TACO.
+
+---
+
+## Guía de Lectura y Seguimiento del Repositorio para Entregas Parciales
+
+Este repositorio contiene el desarrollo del proyecto, enfocado en la **identificación del problema, análisis exploratorio de datos (EDA), y preprocesamiento** del *dataset*, junto con el *framework* de desarrollo de modelos base para la visión artificial.
+
+---
+
+### Estructura y Avances Clave
+
+#### Análisis y Exploración de Datos (EDA)
+
+Los *notebooks* de Jupyter ubicados en la carpeta `/notebooks` documentan las etapas iniciales de análisis. Todos los *notebooks* se encuentran **pre-ejecutados** para una visualización y revisión rápida de los resultados.
+
+* **Exploración Inicial:**
+    * `notebooks/01_exploration/data_exploration_taco.ipynb`: Contiene el **Análisis Exploratorio de Datos (EDA)** principal, enfocado en la estructura inicial del *dataset*.
+* **Preprocesamiento y Balance de Clases:**
+    * `notebooks/02_preprocessing/class_balance_analysis.ipynb`: Análisis detallado del **desbalance extremo entre las clases** del *dataset*.
+    * `notebooks/02_preprocessing/preprocessing_visualization.ipynb`: Muestra el primer avance en la estrategia para **reducir el desbalance** y mejorar la **generalización** del modelo.
+
+> **Conclusiones y Mejoras en el Dataset:**
+> Los *notebooks* incluyen **conclusiones** sobre la limpieza del *dataset* (identificación de clases sin imágenes, *bounding boxes* mal etiquetados y etiquetas erróneas). También se proponen **mejoras** para aumentar la representatividad y generalización de cada clase (e.g., *augmentation*).
+
+#### Framework de Desarrollo Base
+
+El entorno de desarrollo requiere un *pipeline* de entrenamiento base para **analizar el impacto** de los cambios en el *dataset*. Por ello, se ha desarrollado una librería flexible para probar un banco de modelos.
+
+* **Código Fuente:** La carpeta `/src` contiene las **librerías base** del *pipeline* de visión artificial, con cada etapa modularizada (carga de datos, modelo, entrenamiento, etc.).
+* **Scripts de Ejecución:** Los *scripts* generales para orquestar el *pipeline* y utilizar las librerías se encuentran en la carpeta `/scripts`.
+
+---
+
+### Hitos y Tareas **EN DESARROLLO**
+
+El siguiente conjunto de tareas representa el enfoque actual para la próxima iteración:
+
+* **Integración de Herramientas:**
+    * Integración completa con **MLFlow** para el seguimiento y gestión de experimentos.
+    * Integración del modelo **YOLO** a través de las librerías de Ultralitics.
+* **Mejoras en el Dataset:**
+    * Implementación y testeo de cambios en el *dataset* a través de técnicas de **Data Augmentation**.
+* **Definición de Métricas y Pérdidas:**
+    * Definición de **métricas** acordes a la lógica de negocio del proyecto.
+    * Implementación de una **función de pérdida ponderada** (*Weighted Loss*) para mitigar el grave desbalance de clases.
+
+---
+
+### Checklist de Seguimiento de Avance (Entregas Parciales)
+
+| **Componente** | **Estado** | **Archivos Clave (para revisión)** |
+| :--- | :--- | :--- |
+| **Análisis Exploratorio de Datos (EDA)** | **COMPLETADO** | `notebooks/01_exploration/data_exploration_taco.ipynb` |
+| **Análisis de Desbalance de Clases** | **COMPLETADO** | `notebooks/02_preprocessing/class_balance_analysis.ipynb` |
+| **Avance en Preprocesamiento y Balanceo** | **COMPLETADO** | `notebooks/02_preprocessing/preprocessing_visualization.ipynb` |
+| **Framework Base (Librerías)** | **COMPLETADO** | `/src` (Estructura de *pipeline* de VA) |
+| **Integración con MLFlow** | **EN DESARROLLO** | N/A (Próxima iteración) |
+| **Integración de Modelo YOLO** | **EN DESARROLLO** | N/A (Próxima iteración) |
+| **Implementación de Data Augmentation** | **EN DESARROLLO** | N/A (Próxima iteración) |
+| **Definición de Métricas de Negocio** | **EN DESARROLLO** | N/A (Próxima iteración) |
+| **Implementación de Pérdida Ponderada** | **EN DESARROLLO** | N/A (Próxima iteración) |
