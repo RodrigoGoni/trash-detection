@@ -30,6 +30,11 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=None)
     parser.add_argument('--batch-size', type=int, default=None)
     parser.add_argument('--device', type=str, default=None)
+    parser.add_argument('--resume', action='store_true', dest='resume_override',
+                        help='Force resume from checkpoint (overrides config)')
+    parser.add_argument('--no-resume', action='store_false', dest='resume_override',
+                        help='Force fresh training (overrides config)')
+    parser.set_defaults(resume_override=None)  # None means use config value
     parser.add_argument('--skip-test', action='store_true', 
                         help='Skip test evaluation after training')
     parser.add_argument('--test-conf', type=float, default=0.25,
@@ -57,7 +62,7 @@ def run_test_evaluation(best_weights_path: Path, training_dir: Path, config: dic
     yolo_data_yaml = Path('./data/yolo/data.yaml')
     
     if not best_weights_path.exists():
-        print(f"⚠ Warning: Best weights not found at {best_weights_path}")
+        print(f"Warning: Best weights not found at {best_weights_path}")
         print("Skipping test evaluation")
         return
     
@@ -115,19 +120,19 @@ def run_test_evaluation(best_weights_path: Path, training_dir: Path, config: dic
     # Log main test metrics
     if 'metrics/mAP50(B)' in metrics_dict:
         mlflow.log_metric('test_mAP50', float(metrics_dict['metrics/mAP50(B)']))
-        print(f"✓ test_mAP50: {metrics_dict['metrics/mAP50(B)']:.4f}")
+        print(f"test_mAP50: {metrics_dict['metrics/mAP50(B)']:.4f}")
     
     if 'metrics/mAP50-95(B)' in metrics_dict:
         mlflow.log_metric('test_mAP50_95', float(metrics_dict['metrics/mAP50-95(B)']))
-        print(f"✓ test_mAP50_95: {metrics_dict['metrics/mAP50-95(B)']:.4f}")
+        print(f"test_mAP50_95: {metrics_dict['metrics/mAP50-95(B)']:.4f}")
     
     if 'metrics/precision(B)' in metrics_dict:
         mlflow.log_metric('test_precision', float(metrics_dict['metrics/precision(B)']))
-        print(f"✓ test_precision: {metrics_dict['metrics/precision(B)']:.4f}")
+        print(f"test_precision: {metrics_dict['metrics/precision(B)']:.4f}")
     
     if 'metrics/recall(B)' in metrics_dict:
         mlflow.log_metric('test_recall', float(metrics_dict['metrics/recall(B)']))
-        print(f"✓ test_recall: {metrics_dict['metrics/recall(B)']:.4f}")
+        print(f"test_recall: {metrics_dict['metrics/recall(B)']:.4f}")
     
     # Log test losses if available
     results_csv = test_results_dir / 'results.csv'
@@ -145,7 +150,7 @@ def run_test_evaluation(best_weights_path: Path, training_dir: Path, config: dic
         if all(k in df.columns for k in ['val/box_loss', 'val/cls_loss', 'val/dfl_loss']):
             total_loss = float(df['val/box_loss'].iloc[0] + df['val/cls_loss'].iloc[0] + df['val/dfl_loss'].iloc[0])
             mlflow.log_metric('test_total_loss', total_loss)
-            print(f"✓ test_total_loss: {total_loss:.4f}")
+            print(f"test_total_loss: {total_loss:.4f}")
     
     # Log test artifacts
     print("\nLogging test artifacts...")
@@ -187,7 +192,7 @@ def run_test_evaluation(best_weights_path: Path, training_dir: Path, config: dic
         mlflow.log_artifact(str(predictions_json), artifact_path="test/results")
         artifact_count += 1
     
-    print(f"✓ Logged {artifact_count} test artifacts")
+    print(f"Logged {artifact_count} test artifacts")
     
     # Create and log test summary
     test_summary = {
@@ -239,21 +244,72 @@ def main():
     device = torch.device(args.device if args.device else ('cuda' if torch.cuda.is_available() else 'cpu'))
     print(f"Using device: {device}")
     
+    # Get resume setting from config (this is the source of truth)
+    # Command line args can override if explicitly provided
+    yolo_config = config.get('yolo_training', {})
+    resume_from_config = yolo_config.get('resume', False)
+    
+    # Allow command line to override config
+    # If --resume or --no-resume is explicitly used, it overrides config
+    # Otherwise, use the config value
+    if args.resume_override is not None:
+        should_resume = args.resume_override
+        print(f"Resume overridden by command line: {should_resume}")
+    else:
+        should_resume = resume_from_config
+    
+    # Check for existing checkpoint
+    results_dir = Path(f"./runs/detect/{config['experiment']['name']}")
+    last_checkpoint = results_dir / 'weights' / 'last.pt'
+    checkpoint_exists = last_checkpoint.exists()
+    
+    # Final decision: resume only if checkpoint exists AND should_resume is True
+    resume_from_checkpoint = checkpoint_exists and should_resume
+    
     print("\n" + "="*60)
     print("CREATING MODEL")
     print("="*60)
+    print(f"Resume setting in config: {resume_from_config}")
+    print(f"Checkpoint exists: {checkpoint_exists}")
+    if checkpoint_exists:
+        print(f"Checkpoint path: {last_checkpoint}")
+    print(f"Will resume: {resume_from_checkpoint}")
+    print("="*60)
     
     model_size = config['model'].get('model_size', 's')
-    num_classes_yolo = config['model']['num_classes'] - 1
+    # YOLO doesn't use background class, so we use num_classes directly
+    num_classes_yolo = config['model']['num_classes']
     
-    model = YOLOv11Detector(
-        num_classes=num_classes_yolo,
-        model_size=model_size,
-        pretrained=config['model'].get('pretrained', True),
-        img_size=config['data']['img_size']
-    )
+    if resume_from_checkpoint:
+        print(f"RESUMING FROM CHECKPOINT")
+        print(f"   Loading: {last_checkpoint.name}")
+        # Load from checkpoint instead of pretrained weights
+        model = YOLOv11Detector(
+            num_classes=num_classes_yolo,
+            model_size=model_size,
+            pretrained=False,  # Don't load pretrained, we'll load checkpoint
+            img_size=config['data']['img_size']
+        )
+        # Load the checkpoint
+        model.model = YOLO(str(last_checkpoint))
+        print(f"Checkpoint loaded successfully")
+    else:
+        if checkpoint_exists and not should_resume:
+            print(f"CHECKPOINT IGNORED (resume=False in config)")
+            print(f"   Checkpoint exists at: {last_checkpoint}")
+            print(f"   Starting FRESH training with pretrained weights")
+        else:
+            print(f"STARTING FRESH TRAINING")
+            print(f"   No checkpoint found" if not checkpoint_exists else "")
+        
+        model = YOLOv11Detector(
+            num_classes=num_classes_yolo,
+            model_size=model_size,
+            pretrained=config['model'].get('pretrained', True),
+            img_size=config['data']['img_size']
+        )
     
-    print(f"YOLOv11-{model_size.upper()} model created")
+    print(f"YOLOv11-{model_size.upper()} model ready")
     
     yolo_data_yaml = Path('./data/yolo/data.yaml')
     
@@ -264,8 +320,17 @@ def main():
     dataset_version = dataset_info.get('dataset_hash', 'unknown')
     run_name = f"yolov11{model_size}_{dataset_version}"
     
-    # Get YOLO-specific configuration
-    yolo_config = config.get('yolo_training', {})
+    # Get YOLO-specific configuration and set resume parameter
+    yolo_config = config.get('yolo_training', {}).copy()
+    
+    # Set resume based on our decision (config + checkpoint availability)
+    yolo_config['resume'] = resume_from_checkpoint
+    
+    print(f"YOLO Training Config:")
+    print(f"   Resume: {yolo_config['resume']}")
+    print(f"   Epochs: {config['training']['num_epochs']}")
+    print(f"   Batch size: {config['data']['batch_size']}")
+    print(f"   Optimizer: {yolo_config.get('optimizer', 'auto')}")
     
     with mlflow.start_run(run_name=run_name):
         print("\n" + "="*60)
@@ -279,11 +344,21 @@ def main():
             dataset_version=dataset_version,
             device=device
         )
+        
+        # Log resume information
+        mlflow.log_param('resume_training', resume_from_checkpoint)
+        if resume_from_checkpoint:
+            mlflow.log_param('checkpoint_path', str(last_checkpoint))
+        
         print("Logged training configuration")
         
         print("\n" + "="*60)
         print("STARTING TRAINING")
         print("="*60)
+        if resume_from_checkpoint:
+            print(f"Resuming from checkpoint: {last_checkpoint.name}")
+        else:
+            print(f"Starting fresh training")
         
         results = model.train_yolo(
             data_yaml=str(yolo_data_yaml),

@@ -27,7 +27,7 @@ model:
   name: "YOLOv11"
   model_size: "l"  # Options: 'n', 's', 'm', 'l', 'x'
   pretrained: true
-  num_classes: 23  # 60 classes (no background for YOLO)
+  num_classes: 23  # Number of classes (YOLO doesn't use background class)
 
 # Training settings (basic parameters)
 training:
@@ -76,14 +76,14 @@ yolo_training:
   # TRAINING STRATEGY
   # ============================================================
   seed: 0                      # Random seed for reproducibility
-  deterministic: false          # Force deterministic algorithms
+  deterministic: false         # Force deterministic algorithms
   single_cls: false            # Treat multi-class as single class
   classes: null                # List of class IDs to train on (null = all classes)
   rect: false                  # Rectangular training (minimum padding strategy)
   compile: false               # PyTorch 2.x torch.compile (True, False, or mode string)
   close_mosaic: 30             # Disable mosaic in last N epochs
-  resume: true                # Resume from last checkpoint
-  patience: 100                 # Early stopping patienc
+  resume: false                 # Resume from last checkpoint if it exists (auto-detected by script)
+  patience: 100                # Early stopping patience (epochs without improvement)
   
   # ============================================================
   # DATA AUGMENTATION (YOLO-specific)
@@ -113,7 +113,7 @@ yolo_training:
     copy_paste: 0.1            # Copy-paste augmentation probability (0.0-1.0)
     cutmix: 0.1
     erasing: 0.3
-    
+
 # MLflow settings
 mlflow:
   tracking_uri: "./mlruns"

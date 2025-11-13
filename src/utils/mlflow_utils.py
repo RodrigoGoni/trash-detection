@@ -41,8 +41,8 @@ def setup_mlflow(config: dict):
         mlflow.set_experiment(experiment_name)
     except mlflow.exceptions.MlflowException as e:
         if "deleted experiment" in str(e).lower():
-            print(f"⚠️  Experiment '{experiment_name}' was previously deleted.")
-            print("   Attempting to restore or create new experiment...")
+            print(f"Experiment '{experiment_name}' was previously deleted.")
+            print("Attempting to restore...")
             
             # Try to restore the experiment
             client = mlflow.tracking.MlflowClient()
@@ -52,16 +52,20 @@ def setup_mlflow(config: dict):
                 if experiment and experiment.lifecycle_stage == "deleted":
                     # Restore the experiment
                     client.restore_experiment(experiment.experiment_id)
-                    print(f"✓  Restored experiment: {experiment_name}")
+                    print(f"Successfully restored experiment: {experiment_name}")
                     mlflow.set_experiment(experiment_name)
                 else:
-                    raise e
+                    # If experiment doesn't exist, create it
+                    print(f"Creating new experiment: {experiment_name}")
+                    mlflow.set_experiment(experiment_name)
             except Exception as restore_error:
-                print(f"⚠️  Could not restore experiment: {restore_error}")
-                print("   Please run one of the following commands:")
-                print(f"   1. Restore: mlflow experiments restore --experiment-name '{experiment_name}'")
-                print(f"   2. Delete permanently and create new: mlflow gc --backend-store-uri mlruns")
-                raise
+                print(f"Could not restore experiment: {restore_error}")
+                print("   Creating new experiment instead...")
+                # Force create new experiment by using a slightly different name
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                new_experiment_name = f"{experiment_name}_{timestamp}"
+                print(f"✓  Creating: {new_experiment_name}")
+                mlflow.set_experiment(new_experiment_name)
         else:
             raise
 

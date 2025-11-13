@@ -29,9 +29,9 @@ def parse_args():
                        help='Dataset version name (default: auto-generated timestamp)')
     parser.add_argument('--overwrite', action='store_true', default=False,
                        help='Overwrite existing processed dataset (otherwise creates versioned folder)')
-    parser.add_argument('--val-split', type=float, default=0.15,
+    parser.add_argument('--val-split', type=float, default=0.12,
                        help='Validation split ratio')
-    parser.add_argument('--test-split', type=float, default=0.15,
+    parser.add_argument('--test-split', type=float, default=0.8,
                        help='Test split ratio')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed')
