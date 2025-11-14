@@ -295,19 +295,40 @@ def main():
         print(f"Checkpoint loaded successfully")
     else:
         if checkpoint_exists and not should_resume:
-            print(f"CHECKPOINT IGNORED (resume=False in config)")
-            print(f"   Checkpoint exists at: {last_checkpoint}")
-            print(f"   Starting FRESH training with pretrained weights")
+            # Use the trained weights as starting point instead of COCO pretrained
+            best_weights = results_dir / 'weights' / 'best.pt'
+            if best_weights.exists():
+                print(f"USING TRAINED WEIGHTS AS STARTING POINT")
+                print(f"Loading best weights from previous training: {best_weights.name}")
+                print(f"This will continue training from your 600 epochs model")
+                model = YOLOv11Detector(
+                    num_classes=num_classes_yolo,
+                    model_size=model_size,
+                    pretrained=False,
+                    img_size=config['data']['img_size']
+                )
+                model.model = YOLO(str(best_weights))
+                print(f"Trained weights loaded successfully")
+            else:
+                print(f"CHECKPOINT IGNORED (resume=False in config)")
+                print(f"   Checkpoint exists at: {last_checkpoint}")
+                print(f"   Starting FRESH training with pretrained weights")
+                model = YOLOv11Detector(
+                    num_classes=num_classes_yolo,
+                    model_size=model_size,
+                    pretrained=config['model'].get('pretrained', True),
+                    img_size=config['data']['img_size']
+                )
         else:
             print(f"STARTING FRESH TRAINING")
             print(f"   No checkpoint found" if not checkpoint_exists else "")
-        
-        model = YOLOv11Detector(
-            num_classes=num_classes_yolo,
-            model_size=model_size,
-            pretrained=config['model'].get('pretrained', True),
-            img_size=config['data']['img_size']
-        )
+            
+            model = YOLOv11Detector(
+                num_classes=num_classes_yolo,
+                model_size=model_size,
+                pretrained=config['model'].get('pretrained', True),
+                img_size=config['data']['img_size']
+            )
     
     print(f"YOLOv11-{model_size.upper()} model ready")
     

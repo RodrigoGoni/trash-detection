@@ -376,3 +376,98 @@ El siguiente conjunto de tareas representa el enfoque actual para la próxima it
 | **Implementación de Data Augmentation** | **EN DESARROLLO** | N/A (Próxima iteración) |
 | **Definición de Métricas de Negocio** | **EN DESARROLLO** | N/A (Próxima iteración) |
 | **Implementación de Pérdida Ponderada** | **EN DESARROLLO** | N/A (Próxima iteración) |
+
+
+
+## Problema Crítico: Orientación EXIF en Dataset TACO
+
+### Problema Detectado
+
+**Ultralytics NO gestiona automáticamente la orientación EXIF**, lo que causa un desajuste entre las anotaciones y las imágenes durante el entrenamiento.
+
+### Análisis del Problema
+
+**¿Qué es la orientación EXIF?**
+- Los metadatos EXIF en imágenes JPEG incluyen un flag de orientación (1-8)
+- Este flag indica cómo debe rotarse la imagen para visualizarla correctamente
+- Muchas cámaras guardan fotos rotadas físicamente pero con flag EXIF para "corregir" la visualización
+
+**El Desajuste:**
+
+1. **Visualización (navegadores, PIL, visores de fotos):**
+   - Lee el flag EXIF y aplica rotación automáticamente
+   - Muestra la imagen correctamente orientada (e.g., 2988x5312 vertical)
+
+2. **Ultralytics/OpenCV durante entrenamiento:**
+   - Usa `cv2.imread()` que IGNORA completamente los metadatos EXIF
+   - Lee los píxeles RAW sin aplicar rotación
+   - Ve dimensiones físicas del archivo (e.g., 5312x2988 horizontal)
+
+3. **Las Anotaciones (bounding boxes):**
+   - Fueron creadas sobre la imagen visualizada correctamente (con EXIF aplicado)
+   - Coordenadas corresponden a la versión rotada (2988x5312)
+
+4. **Resultado:**
+   - El modelo ve: 5312x2988 (píxeles RAW)
+   - Las anotaciones esperan: 2988x5312 (versión rotada)
+   - PROBLEMA: bounding boxes en posiciones incorrectas
+
+### Ejemplo Concreto del Dataset TACO
+
+```
+Archivo: batch_1/000042.jpg
+├─ Dimensiones físicas RAW: 5312x2988 (horizontal)
+├─ Flag EXIF Orientation: 6 (rotar 90° horario)
+├─ Visualización correcta: 2988x5312 (vertical)
+├─ Lo que ve Ultralytics: 5312x2988 (horizontal, sin rotación)
+└─ Anotaciones: Para imagen 2988x5312 → INCORRECTAS
+```
+
+### Solución Implementada
+
+**1. Integración en `prepare_data.py`**
+
+El script de preprocesamiento ahora corrige automáticamente la orientación EXIF:
+
+```bash
+# Con corrección EXIF (por defecto)
+python scripts/prepare_data.py --overwrite
+
+# Sin corrección EXIF (no recomendado)
+python scripts/prepare_data.py --no-fix-exif --overwrite
+```
+
+**Proceso de corrección:**
+1. Lee la imagen con PIL
+2. Aplica `ImageOps.exif_transpose()` para rotar físicamente los píxeles
+3. Guarda la imagen rotada SIN metadatos EXIF (quality=95)
+4. Mantiene la estructura de directorios `batch_X/`
+
+**2. Estadísticas del Dataset TACO**
+
+Después de ejecutar `prepare_data.py`:
+
+```
+================================================================================
+EXIF CORRECTIONS
+================================================================================
+Train: 144/698 imágenes corregidas (20.6%)
+================================================================================
+```
+
+### Beneficios de la Corrección
+
+- **Consistencia**: Modelo ve exactamente lo que las anotaciones describen  
+- **Reproducibilidad**: Mismo comportamiento en entrenamiento y producción  
+- **Automatización**: Se integra en el pipeline de preprocesamiento  
+- **Preservación**: Mantiene calidad de imagen (JPEG quality=95)  
+- **Trazabilidad**: Estadísticas guardadas en `dataset_stats.json`
+
+
+### Referencias
+
+- **EXIF Orientation**: [EXIF Specification](https://www.exif.org/Exif2-2.PDF) Section 4.6.4A
+- **PIL exif_transpose**: [Pillow Documentation](https://pillow.readthedocs.io/en/stable/reference/ImageOps.html#PIL.ImageOps.exif_transpose)
+- **OpenCV EXIF Issue**: [GitHub Issue #16352](https://github.com/opencv/opencv/issues/16352)
+
+---

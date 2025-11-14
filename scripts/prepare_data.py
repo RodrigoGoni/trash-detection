@@ -15,6 +15,8 @@ from collections import defaultdict, Counter
 from sklearn.model_selection import train_test_split
 from typing import Dict, List, Tuple, Set
 from datetime import datetime
+from PIL import Image, ImageOps
+from PIL.ExifTags import TAGS
 
 
 def parse_args():
@@ -31,7 +33,7 @@ def parse_args():
                        help='Overwrite existing processed dataset (otherwise creates versioned folder)')
     parser.add_argument('--val-split', type=float, default=0.12,
                        help='Validation split ratio')
-    parser.add_argument('--test-split', type=float, default=0.8,
+    parser.add_argument('--test-split', type=float, default=0.08,
                        help='Test split ratio')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed')
@@ -45,9 +47,54 @@ def parse_args():
                        help='IoU threshold for deciding bbox occlusion (default: 0.3)')
     parser.add_argument('--minority-threshold', type=int, default=50,
                        help='Classes with fewer annotations are considered minority (default: 50)')
-    parser.add_argument('--min-class-samples', type=int, default=0,
+    parser.add_argument('--min-class-samples', type=int, default=50,
                        help='Minimum number of samples required per class (classes below this threshold will be removed, default: 0 = no filtering)')
+    parser.add_argument('--fix-exif', action='store_true', default=True,
+                       help='Fix EXIF orientation when copying images (default: True)')
+    parser.add_argument('--no-fix-exif', action='store_false', dest='fix_exif',
+                       help='Do not fix EXIF orientation')
     return parser.parse_args()
+
+
+def get_exif_orientation(image_path: Path) -> int:
+    """Get EXIF orientation tag from image."""
+    try:
+        img = Image.open(image_path)
+        exif = img._getexif()
+        if exif is not None:
+            for tag_id, value in exif.items():
+                tag = TAGS.get(tag_id, tag_id)
+                if tag == 'Orientation':
+                    return value
+        return 1  # Default orientation
+    except Exception:
+        return 1
+
+
+def fix_image_orientation(src_path: Path, dst_path: Path) -> bool:
+    """
+    Copy image and fix EXIF orientation.
+    Returns True if orientation was corrected, False otherwise.
+    """
+    try:
+        img = Image.open(src_path)
+        
+        # Apply EXIF orientation and remove EXIF data
+        img_corrected = ImageOps.exif_transpose(img)
+        
+        if img_corrected is None:
+            # No correction needed, just copy
+            shutil.copy2(src_path, dst_path)
+            return False
+        
+        # Save with corrected orientation, removing EXIF
+        img_corrected.save(dst_path, 'JPEG', quality=95, exif=b'')
+        return True
+        
+    except Exception as e:
+        # Fallback to simple copy if something fails
+        shutil.copy2(src_path, dst_path)
+        return False
 
 
 def load_coco_annotations(annotations_file: Path) -> dict:
@@ -345,12 +392,27 @@ def create_split_annotations(data: dict, split_images: list, split_name: str) ->
     return split_data, image_id_mapping
 
 
-def copy_images(raw_dir: Path, processed_dir: Path, split_images: list, split_name: str) -> None:
-    """Copy images to processed directory, maintaining batch_X subdirectory structure."""
+def copy_images(raw_dir: Path, processed_dir: Path, split_images: list, split_name: str, 
+                fix_exif: bool = True) -> dict:
+    """
+    Copy images to processed directory, maintaining batch_X subdirectory structure.
+    Optionally fixes EXIF orientation.
+    
+    Returns:
+        Dictionary with statistics about EXIF corrections
+    """
     output_dir = processed_dir / split_name / 'images'
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"  Copying {len(split_images)} images to {split_name}/images/...")
+    exif_stats = {
+        'total': len(split_images),
+        'corrected': 0,
+        'not_found': 0
+    }
+    
+    print(f"  Copying {len(split_images)} images to {split_name}/images/ "
+          f"(fix_exif={fix_exif})...")
+    
     for img in split_images:
         src_path = raw_dir / img['file_name']
         if src_path.exists():
@@ -358,9 +420,23 @@ def copy_images(raw_dir: Path, processed_dir: Path, split_images: list, split_na
             # file_name is like "batch_1/000000.jpg"
             dst_path = output_dir / img['file_name']
             dst_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_path, dst_path)
+            
+            if fix_exif:
+                # Fix EXIF orientation when copying
+                was_corrected = fix_image_orientation(src_path, dst_path)
+                if was_corrected:
+                    exif_stats['corrected'] += 1
+            else:
+                # Simple copy without EXIF correction
+                shutil.copy2(src_path, dst_path)
         else:
             print(f"    Warning: Source image not found: {src_path}")
+            exif_stats['not_found'] += 1
+    
+    if fix_exif and exif_stats['corrected'] > 0:
+        print(f"    ✓ Fixed EXIF orientation for {exif_stats['corrected']} images")
+    
+    return exif_stats
 
 
 def compute_statistics(data: dict, train_data: dict, val_data: dict, test_data: dict) -> dict:
@@ -401,7 +477,8 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
                    test_split: float, seed: int, min_annotations: int = 1,
                    stratify: bool = True, minority_threshold: int = 50,
                    duplicate_multi_label: bool = False, iou_threshold: float = 0.3,
-                   version: str = None, overwrite: bool = False, min_class_samples: int = 0):
+                   version: str = None, overwrite: bool = False, min_class_samples: int = 0,
+                   fix_exif: bool = True):
     """Prepare TACO dataset by splitting into train/val/test sets with stratification."""
     raw_path = Path(raw_dir)
     
@@ -539,9 +616,9 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
     
     # Copy images
     print("\nCopying images...")
-    copy_images(raw_path, processed_path, train_images, 'train')
-    copy_images(raw_path, processed_path, val_images, 'val')
-    copy_images(raw_path, processed_path, test_images, 'test')
+    train_exif_stats = copy_images(raw_path, processed_path, train_images, 'train', fix_exif)
+    val_exif_stats = copy_images(raw_path, processed_path, val_images, 'val', fix_exif)
+    test_exif_stats = copy_images(raw_path, processed_path, test_images, 'test', fix_exif)
     
     # Save statistics
     stats = compute_statistics(data, train_data, val_data, test_data)
@@ -549,6 +626,15 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
         'threshold': minority_threshold,
         'classes': {class_info['cat_id_to_name'][cat_id]: class_info['class_counts'][cat_id] 
                    for cat_id in sorted(minority_classes)}
+    }
+    stats['exif_corrections'] = {
+        'enabled': fix_exif,
+        'train': train_exif_stats,
+        'val': val_exif_stats,
+        'test': test_exif_stats,
+        'total_corrected': (train_exif_stats['corrected'] + 
+                           val_exif_stats['corrected'] + 
+                           test_exif_stats['corrected'])
     }
     stats['version_info'] = {
         'version': version if version else 'overwrite',
@@ -562,7 +648,8 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
             'minority_threshold': minority_threshold,
             'duplicate_multi_label': duplicate_multi_label,
             'iou_threshold': iou_threshold,
-            'min_class_samples': min_class_samples
+            'min_class_samples': min_class_samples,
+            'fix_exif': fix_exif
         }
     }
     with open(processed_path / 'dataset_stats.json', 'w') as f:
@@ -582,6 +669,10 @@ def prepare_dataset(raw_dir: str, processed_dir: str, val_split: float,
         print(f"Min class samples: {min_class_samples}")
     print(f"Minority classes: {len(minority_classes)} (< {minority_threshold} annotations)")
     print(f"Stratified split: {stratify}")
+    if fix_exif:
+        total_corrected = stats['exif_corrections']['total_corrected']
+        total_images = len(train_images) + len(val_images) + len(test_images)
+        print(f"EXIF corrections: {total_corrected}/{total_images} images")
     if not overwrite:
         print(f"Symlink 'processed' points to: {processed_path.name}")
     print("="*60)
@@ -603,7 +694,8 @@ def main():
         iou_threshold=args.iou_threshold,
         version=args.version,
         overwrite=args.overwrite,
-        min_class_samples=args.min_class_samples
+        min_class_samples=args.min_class_samples,
+        fix_exif=args.fix_exif
     )
 
 
