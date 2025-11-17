@@ -37,9 +37,9 @@ def parse_args():
     parser.set_defaults(resume_override=None)  # None means use config value
     parser.add_argument('--skip-test', action='store_true', 
                         help='Skip test evaluation after training')
-    parser.add_argument('--test-conf', type=float, default=0.25,
+    parser.add_argument('--test-conf', type=float, default=0.3,
                         help='Confidence threshold for test evaluation')
-    parser.add_argument('--test-iou', type=float, default=0.45,
+    parser.add_argument('--test-iou', type=float, default=0.55,
                         help='IoU threshold for test evaluation')
     return parser.parse_args()
 
@@ -430,7 +430,7 @@ def main():
                 iou_threshold=args.test_iou
             )
         else:
-            print("\n⚠ Test evaluation skipped (--skip-test flag provided)")
+            print("Test evaluation skipped (--skip-test flag provided)")
 
 
 if __name__ == '__main__':

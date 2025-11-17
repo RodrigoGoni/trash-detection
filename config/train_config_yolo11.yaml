@@ -68,7 +68,7 @@ yolo_training:
   # ============================================================
   # LOSS WEIGHTS
   # ============================================================
-  box: 8.5                     # Box loss weight
+  box: 10.0                     # Box loss weight
   cls: 0.5                     # Classification loss weight
   dfl: 1.5                     # Distribution focal loss weight
   
@@ -99,7 +99,7 @@ yolo_training:
     # Geometric augmentations
     degrees: 45              # Image rotation (+/- degrees)
     translate: 0.25            # Image translation (+/- fraction)
-    scale: 0.5                # Image scale (+/- gain)
+    scale: 0.9                # Image scale (+/- gain)
     shear: 5                 # Image shear (+/- degrees)
     perspective: 0.0000       # Perspective transformation (0.0-0.001)
     
@@ -108,9 +108,9 @@ yolo_training:
     fliplr: 0.5               # Horizontal flip probability (0.0-1.0)
     
     # Advanced augmentations
-    mosaic: 0.1               # Mosaic augmentation probability (0.0-1.0)
-    mixup: 0.02                 # Mixup augmentation probability (0.0-1.0)
-    copy_paste: 0.1            # Copy-paste augmentation probability (0.0-1.0)
+    mosaic: 1.0               # Mosaic augmentation probability (0.0-1.0)
+    mixup: 0.1                 # Mixup augmentation probability (0.0-1.0)
+    copy_paste: 0.3            # Copy-paste augmentation probability (0.0-1.0)
     cutmix: 0.1
     erasing: 0.3
 
@@ -120,3 +120,10 @@ mlflow:
   experiment_name: "taco-yolo-detection"
   log_model: true
   log_artifacts: true
+
+# ============================================================
+# POST-PROCESSING THRESHOLDS (para inferencia/evaluación)
+# ============================================================
+inference:
+  conf_threshold: 0.25 
+  iou_threshold: 0.35     

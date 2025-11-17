@@ -1,0 +1,170 @@
+# Instance Segmentation Training Configuration - YOLOv11-seg
+# 
+# Este archivo configura el entrenamiento de modelos YOLOv11 para 
+# instance segmentation (detección + máscaras de segmentación)
+# Ideal para objetos pequeños y delgados como colillas y pajitas
+
+# Experiment settings
+experiment:
+  name: "taco_segmentation_yolo11s_23c_baseline"
+  tags:
+    - "yolo11"
+    - "yolo11s-seg"
+    - "instance_segmentation"
+    - "baseline"
+    - "adamw_optimizer"
+    - "cosine_scheduler"
+  description: "YOLOv11-small-seg baseline for TACO dataset instance segmentation"
+
+# Data settings
+data:
+  processed_dir: "./data/processed"
+  batch_size: 16
+  num_workers: 12
+  img_size: 640
+  dataset_version: "v1.0"
+
+# Model settings
+model:
+  name: "YOLOv11-seg"
+  model_size: "s"  # Options: 'n', 's', 'm', 'l', 'x'
+  pretrained: true  # Usa pesos pre-entrenados en COCO-seg
+  num_classes: 23  # Number of classes (YOLO doesn't use background class)
+
+# Training settings (basic parameters)
+training:
+  num_epochs: 300
+  device: "cuda"
+
+# ============================================================
+# YOLO-SPECIFIC TRAINING PARAMETERS FOR SEGMENTATION
+# ============================================================
+# Estos parámetros se pasan directamente a YOLO durante el entrenamiento
+# Ref: https://docs.ultralytics.com/modes/train/
+yolo_training:
+  # ============================================================
+  # TRAINING BEHAVIOR
+  # ============================================================
+  dropout: 0.0                 # Dropout rate for regularization (0.0-0.5)
+  val: true                    # Enable validation during training
+  plots: true                  # Generate and save training plots
+  save: true                   # Save checkpoints
+  
+  # ============================================================
+  # LEARNING RATE & OPTIMIZATION
+  # ============================================================
+  optimizer: 'AdamW'           # Options: SGD, Adam, AdamW, NAdam, RAdam, RMSProp, auto
+  lr0: 0.001                   # Initial LR (SGD=1E-2, Adam/AdamW=1E-3)
+  lrf: 0.01                    # Final LR as fraction of lr0
+  momentum: 0.937              # Momentum for SGD or beta1 for Adam
+  weight_decay: 0.0005         # L2 regularization
+  
+  # ============================================================
+  # LEARNING RATE SCHEDULING
+  # ============================================================
+  cos_lr: true                 # Use cosine learning rate scheduler
+  warmup_epochs: 15.0          # Number of warmup epochs
+  warmup_momentum: 0.8         # Initial momentum during warmup
+  warmup_bias_lr: 0.1          # Bias learning rate during warmup
+  
+  # ============================================================
+  # LOSS WEIGHTS
+  # ============================================================
+  box: 7.5                     # Box loss weight (default: 7.5)
+  cls: 0.5                     # Classification loss weight (default: 0.5)
+  dfl: 1.5                     # Distribution focal loss weight (default: 1.5)
+  # No hay parámetro 'seg' específico en YOLO, se calcula automáticamente
+  
+  # ============================================================
+  # SEGMENTATION-SPECIFIC PARAMETERS
+  # ============================================================
+  # Estos parámetros son específicos para instance segmentation
+  overlap_mask: true           # Masks should overlap during training (default: true)
+  mask_ratio: 4                # Mask downsample ratio (default: 4)
+                               # Menor ratio = mayor resolución de máscaras (más memoria)
+                               # Para objetos pequeños considerar mask_ratio: 2 o 1
+  
+  # ============================================================
+  # TRAINING STRATEGY
+  # ============================================================
+  seed: 0                      # Random seed for reproducibility
+  deterministic: false         # Force deterministic algorithms
+  single_cls: false            # Treat multi-class as single class
+  classes: null                # List of class IDs to train on (null = all classes)
+  rect: false                  # Rectangular training (minimum padding strategy)
+  compile: false               # PyTorch 2.x torch.compile (experimental)
+  close_mosaic: 30             # Disable mosaic in last N epochs
+  resume: false                # Resume from last checkpoint if it exists
+  patience: 100                # Early stopping patience (epochs without improvement)
+  
+  # ============================================================
+  # DATA AUGMENTATION (YOLO-specific)
+  # ============================================================
+  # Estas augmentaciones son específicas de YOLO y se aplican automáticamente
+  # IMPORTANTE: Para instance segmentation, las augmentaciones también afectan
+  # las máscaras de segmentación, no solo las bounding boxes
+  augmentation:
+    # Color augmentations
+    hsv_h: 0.015               # HSV Hue augmentation (0.0-1.0)
+    hsv_s: 0.7                 # HSV Saturation augmentation (0.0-1.0)
+    hsv_v: 0.4                 # HSV Value augmentation (0.0-1.0)
+    
+    # Geometric augmentations (afectan máscaras y boxes)
+    degrees: 0.0               # Image rotation (+/- degrees)
+    translate: 0.1             # Image translation (+/- fraction)
+    scale: 0.5                 # Image scale (+/- gain)
+    shear: 0.0                 # Image shear (+/- degrees)
+    perspective: 0.0           # Perspective transformation (0.0-0.001)
+    
+    # Flip augmentations
+    flipud: 0.0                # Vertical flip probability (0.0-1.0)
+    fliplr: 0.5                # Horizontal flip probability (0.0-1.0)
+    
+    # Advanced augmentations
+    # IMPORTANTE: Mosaic y Mixup son muy útiles para segmentación
+    mosaic: 1.0                # Mosaic augmentation probability (0.0-1.0)
+    mixup: 0.0                 # Mixup augmentation probability (0.0-1.0)
+    copy_paste: 0.0            # Copy-paste augmentation (útil para objetos pequeños)
+
+# MLflow settings
+mlflow:
+  tracking_uri: "./mlruns"
+  experiment_name: "taco-yolo-segmentation"
+  log_model: true
+  log_artifacts: true
+
+# ============================================================
+# POST-PROCESSING THRESHOLDS (para inferencia/evaluación)
+# ============================================================
+inference:
+  conf_threshold: 0.25         # Confidence threshold for predictions
+  iou_threshold: 0.7           # IoU threshold for NMS
+  # Para segmentación, también se usa IoU threshold para máscaras
+
+# ============================================================
+# NOTES FOR SMALL OBJECTS (cigarettes, straws, etc.)
+# ============================================================
+# 
+# Para mejorar la detección de objetos pequeños y delgados:
+#
+# 1. RESOLUCIÓN DE MÁSCARAS:
+#    - Reducir mask_ratio a 2 o incluso 1 (mayor resolución, más memoria)
+#    - img_size: considerar 1280 en lugar de 640
+#
+# 2. AUGMENTACIONES:
+#    - Habilitar copy_paste: 0.5 (duplica objetos pequeños)
+#    - Reducir scale range para evitar hacer objetos demasiado pequeños
+#    - Considerar erasing para simular oclusión
+#
+# 3. ARQUITECTURA:
+#    - Modelos más grandes (l, x) tienen mejor rendimiento en objetos pequeños
+#    - Pero requieren más memoria y tiempo de entrenamiento
+#
+# 4. HIPERPARÁMETROS:
+#    - Reducir conf_threshold en inferencia (ej: 0.15) para objetos pequeños
+#    - Ajustar box loss weight si las bboxes son inestables
+#
+# 5. TRAINING:
+#    - Más epochs (500-800) ya que segmentación es más compleja
+#    - close_mosaic: 10-20 para refinar máscaras al final del entrenamiento
+#
