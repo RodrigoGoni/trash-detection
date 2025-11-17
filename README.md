@@ -16,10 +16,9 @@ El objetivo es detectar 60 categorías de basura en imágenes del dataset TACO. 
 
 Para detalles de la justificación de las decisiones y la evolución de los experimentos (incluyendo gráficas de MLflow, análisis de errores y conclusiones del EDA), consultar la documentación en la carpeta `/docs`:
 
--   **[Guía de Procesamiento de Datos (docs/data_processing.md)](docs/data_processing.md):** detalla el Análisis Exploratorio (EDA), la corrección EXIF, el split estratificado y las conclusiones sobre el desbalanceo de clases.
--   **[Guía de Entrenamiento de Modelos (docs/training.md)](docs/training.md):** explica la justificación del *baseline* (Faster R-CNN), la experimentación y la evolución hacia YOLOv11 y la segmentación de instancias.
--   **[Guía de despliegue (docs/deployment.md)](docs/deployment.md):** (Por completar) Pasos para desplegar el modelo como un servicio.
--   **[Referencia de la API (docs/api_reference.md)](docs/api_reference.md):** (Por completar) Documentación de la API de inferencia.
+-   **[Guía de procesamiento de datos (docs/data_processing.md)](docs/data_processing.md):** detalla el Análisis Exploratorio (EDA), la corrección EXIF, el split estratificado y las conclusiones sobre el desbalanceo de clases.
+-   **[Guía de entrenamiento de modelos (docs/training.md)](docs/training.md):** explica la justificación del *baseline* (Faster R-CNN), la experimentación y la evolución hacia YOLOv11 y la segmentación de instancias.
+-   **[Evaluación de modelos (docs/analisis_comparativo_experimentos.md)](docs/analisis_comparativo_experimentos.md):** muestra la evolucion de los entrenamientos, augmentacion y seleccion de parametros.
 
 ## Estructura del Proyecto
 ```

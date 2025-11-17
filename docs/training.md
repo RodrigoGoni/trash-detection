@@ -17,34 +17,7 @@ Todo proceso de machine learning necesita un punto de referencia robusto para me
 
 ---
 
-### 2. Evolución
-
-El entrenamiento no es un solo paso, sino una serie de experimentos iterativos. Cada modificación se justifica en base a los resultados del experimento anterior.
-
-*Nota: Esta sección debe incluir gráficas clave (ej. curvas de pérdida, ejemplos de predicciones) de MLflow para ilustrar la progresión.*
-
-#### Experimento 1: Baseline Puro
-* **Acción:** Entrenar el Faster R-CNN solo con re-escalado y normalización.
-* **Observación (Hipótesis):** Fuerte sobreajuste (overfitting) y bajo rendimiento en clases minoritarias.
-
-#### Experimento 2: Introducción de Augmentations
-* **Justificación:** Para combatir el overfitting y la variabilidad de las imágenes (observada en el EDA).
-* **Acción:** Añadir el pipeline de Albumentations (flips, rotaciones, cambios de brillo/contraste).
-* **Observación:** Mejora de la pérdida de validación y mayor generalización.
-
-#### Experimento 3: Manejo del Desbalance de Clases
-* **Justificación:** El mAP general es aceptable, pero el *recall* en clases minoritarias es muy bajo (detectado en el EDA).
-* **Acción:** Activar el uso de **Focal Loss** (o Class Balanced Loss) para forzar al modelo a enfocarse en los ejemplos difíciles y las clases raras.
-* **Observación:** Mejora significativa en el mAP de clases minoritarias, aunque puede reducir ligeramente la precisión en las clases mayoritarias.
-
-#### Experimento 4: Eliminación de Clases Raras
-* **Justificación:** Algunas clases tienen tan pocas muestras (ej. < 10) que el modelo no puede aprenderlas y solo añaden ruido.
-* **Acción:** Re-ejecutar `prepare_data.py` con `min-annotations` más alto o excluir manualmente clases.
-* **Impacto:** Se debe mostrar el (ligero) impacto en el balance general del dataset y justificarlo en pos de un modelo más estable y con un objetivo más enfocado.
-
----
-
-### 3. Modelo Avanzado: YOLOv11
+### 2. Modelo Avanzado: YOLOv11
 
 Tras analizar los errores del baseline, se exploraron arquitecturas más modernas.
 
@@ -57,7 +30,7 @@ Tras analizar los errores del baseline, se exploraron arquitecturas más moderna
 
 ---
 
-### 4. Próximos Pasos: Instance Segmentation
+### 3. Próximos Pasos: Instance Segmentation
 
 * **Observación (Feedback):** Un problema persistente en la detección de basura es que los *bounding boxes* rectangulares a menudo incluyen una gran cantidad de "fondo" (ej. pasto, asfalto), confundiendo al modelo.
 * **Solución Coherente:** Avanzar hacia la **segmentación de instancias** (ej. Mask R-CNN o YOLOv11-Seg).
@@ -65,11 +38,11 @@ Tras analizar los errores del baseline, se exploraron arquitecturas más moderna
 
 ---
 
-## 5. Configuración detallada del entrenamiento (YAML)
+## 4. Configuración detallada del entrenamiento (YAML)
 
 El *pipeline* de entrenamiento se controla mediante archivos de configuración `.yaml` para garantizar la reproducibilidad y facilitar el seguimiento de experimentos con MLflow. A continuación, se documentan los dos archivos de configuración principales.
 
-### 5.1. Baseline: Faster R-CNN (`train_config.yaml`)
+### 4.1. Baseline: Faster R-CNN (`train_config.yaml`)
 
 Este archivo configura el *pipeline* de entrenamiento para el modelo *baseline* (Faster R-CNN con un *backbone*). Está diseñado para usar un *pipeline* de aumentos de datos externo (vía Albumentations) y una estrategia de pérdida avanzada para combatir el desbalanceo extremo de clases del dataset TACO.
 
