@@ -62,3 +62,33 @@ Tras analizar los errores del baseline, se exploraron arquitecturas más moderna
 * **Observación (Feedback):** Un problema persistente en la detección de basura es que los *bounding boxes* rectangulares a menudo incluyen una gran cantidad de "fondo" (ej. pasto, asfalto), confundiendo al modelo.
 * **Solución Coherente:** Avanzar hacia la **segmentación de instancias** (ej. Mask R-CNN o YOLOv11-Seg).
 * **Justificación:** La segmentación fuerza al modelo a aprender la forma *exacta* del objeto (generando una máscara, no solo una caja). Esto reduce la dependencia del fondo, mejora la separación de objetos superpuestos y proporciona una métrica de IoU mucho más precisa, lo cual es coherente con los problemas observados en el análisis de errores.
+
+---
+
+## 5. Configuración detallada del entrenamiento (YAML)
+
+El *pipeline* de entrenamiento se controla mediante archivos de configuración `.yaml` para garantizar la reproducibilidad y facilitar el seguimiento de experimentos con MLflow. A continuación, se documentan los dos archivos de configuración principales.
+
+### 5.1. Baseline: Faster R-CNN (`train_config.yaml`)
+
+Este archivo configura el *pipeline* de entrenamiento para el modelo *baseline* (Faster R-CNN con un *backbone*). Está diseñado para usar un *pipeline* de aumentos de datos externo (vía Albumentations) y una estrategia de pérdida avanzada para combatir el desbalanceo extremo de clases del dataset TACO.
+
+**Parámetros destacados:**
+
+* **Gestión del desbalanceo (Sección `loss`):** esta es la sección más crítica. Implementa una estrategia de **Class-Balanced Focal Loss**.
+    * `type: "cb_focal"`: Combina Focal Loss (para enfocarse en ejemplos difíciles) con ponderación de clases (para enfocarse en clases raras).
+    * `use_class_weights: true` y `class_weight_method: "effective"`: habilita la ponderación basada en el "Número Efectivo de Muestras", una técnica avanzada que da un peso significativamente mayor a las clases con pocas muestras.
+    * `beta: 0.9999`: parámetro de suavizado para la ponderación. Un valor tan alto es específico para datasets con desbalanceo extremo como TACO.
+    * `gamma: 2.0`: parámetro de enfoque de Focal Loss.
+    * `use_weighted_bbox: true`: aplica esta misma ponderación de clase a la pérdida de regresión de la *bounding box*, asumiendo que las clases raras también son más difíciles de localizar.
+
+* **Augmentation (Sección `augmentation`):** define un *pipeline* de aumento de datos robusto y probabilístico, justificado por el análisis EDA:
+    * Transformaciones geométricas (`horizontal_flip_p: 0.5`, `rotate_limit: 90`) para manejar objetos en cualquier orientación.
+    * Transformaciones fotométricas (`brightness_contrast_p: 0.6`, `hue_saturation_p: 0.4`) para simular las diversas condiciones de iluminación observadas en el dataset.
+    * Aumentos de ruido y oclusión (`blur_p: 0.3`, `noise_p: 0.25`, `cutout_p: 0.2`) para mejorar la robustez.
+
+* **Optimización y Rendimiento:**
+    * `optimizer: "adamw"` y `scheduler: "cosine_annealing_warmup"`: utiliza un optimizador moderno (AdamW) con un *scheduler* de *warmup* y decaimiento coseno para un entrenamiento estable.
+    * `use_amp: true`: habilita **Automatic Mixed Precision (AMP)** para un entrenamiento más rápido y con menor uso de memoria VRAM.
+    * `grad_clip_norm: 1.0`: previene la explosión de gradientes, mejorando la estabilidad del entrenamiento.
+
