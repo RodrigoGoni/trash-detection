@@ -58,7 +58,7 @@ se realizaron cinco experimentos para evaluar el impacto de data augmentation y 
 
 ### visualizaciones
 
-![Métricas de Entrenamiento por Época](training_metrics_by_epoch.png)
+![Métricas de Entrenamiento por Época](images/training_metrics_by_epoch.png)
 
 **figura 1:** evolución por época. observaciones clave:
 - baseline: overfitting severo (val loss 0.75→1.16 después época 5)
@@ -66,7 +66,7 @@ se realizaron cinco experimentos para evaluar el impacto de data augmentation y 
 - runs 3-4: mejor balance precision-recall en validación
 - run 5: mejora gradual pero sin superar augmentation básica
 
-![Resultados en Test](test_results_comparison.png)
+![Resultados en Test](images/test_results_comparison.png)
 
 **figura 2:** métricas finales en test. run 3 (cb_focal + aug básica) logra mejor map (0.148). runs 3-4 (aug básica) muestran f1 similar (~0.24) independiente de loss function.
 - run 5: convergencia más lenta, menor overfitting (0.76 → 0.56)
