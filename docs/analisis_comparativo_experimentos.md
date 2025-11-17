@@ -58,7 +58,9 @@ se realizaron cinco experimentos para evaluar el impacto de data augmentation y 
 
 ### visualizaciones
 
-![Métricas de Entrenamiento por Época](images/training_metrics_by_epoch.png)
+![Train Loss por Época](images/train_loss.png)
+
+![Validation Loss por Época](images/val_loss.png)
 
 **figura 1:** evolución por época. observaciones clave:
 - baseline: overfitting severo (val loss 0.75→1.16 después época 5)
