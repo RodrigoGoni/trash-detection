@@ -91,7 +91,7 @@ def train_one_epoch(model, dataloader, optimizer, device, epoch, scaler=None, gr
         # Forward pass with optional AMP
         if scaler is not None:
             # Mixed precision training
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 loss_dict = model(images, targets)
                 losses = sum(loss for loss in loss_dict.values())
             
