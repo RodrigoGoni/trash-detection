@@ -67,7 +67,8 @@ class FocalLoss(nn.Module):
                 alpha_t = self.alpha
             else:
                 # Alpha is a tensor of shape (num_classes,)
-                alpha_t = self.alpha.gather(0, targets)
+                # Move alpha to the same device as targets
+                alpha_t = self.alpha.to(targets.device).gather(0, targets)
             focal_loss = alpha_t * focal_loss
         
         # Apply reduction

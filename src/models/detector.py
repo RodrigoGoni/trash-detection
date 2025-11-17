@@ -22,23 +22,39 @@ def custom_fastrcnn_loss(class_logits, box_regression, labels, regression_target
     
     # Classification loss with custom loss function support
     if custom_loss_fn is not None:
-        classification_loss = custom_loss_fn(class_logits, labels)
+        # Use only the classification loss component from DetectionLoss
+        classification_loss = custom_loss_fn.classification_loss(class_logits, labels)
+        
+        # Compute bounding box regression loss using DetectionLoss's bbox loss
+        sampled_pos_inds_subset = torch.where(labels > 0)[0]
+        if sampled_pos_inds_subset.numel() > 0:
+            labels_pos = labels[sampled_pos_inds_subset]
+            N, num_classes = class_logits.shape
+            box_regression_reshaped = box_regression.reshape(N, box_regression.size(-1) // 4, 4)
+            
+            box_loss = custom_loss_fn.bbox_loss(
+                box_regression_reshaped[sampled_pos_inds_subset, labels_pos],
+                regression_targets[sampled_pos_inds_subset],
+                labels_pos
+            )
+        else:
+            box_loss = torch.tensor(0.0, device=class_logits.device)
     else:
         classification_loss = F.cross_entropy(class_logits, labels)
-    
-    # Bounding box regression loss
-    sampled_pos_inds_subset = torch.where(labels > 0)[0]
-    labels_pos = labels[sampled_pos_inds_subset]
-    N, num_classes = class_logits.shape
-    box_regression = box_regression.reshape(N, box_regression.size(-1) // 4, 4)
+        
+        # Bounding box regression loss
+        sampled_pos_inds_subset = torch.where(labels > 0)[0]
+        labels_pos = labels[sampled_pos_inds_subset]
+        N, num_classes = class_logits.shape
+        box_regression = box_regression.reshape(N, box_regression.size(-1) // 4, 4)
 
-    box_loss = F.smooth_l1_loss(
-        box_regression[sampled_pos_inds_subset, labels_pos],
-        regression_targets[sampled_pos_inds_subset],
-        beta=1 / 9,
-        reduction="sum",
-    )
-    box_loss = box_loss / labels.numel()
+        box_loss = F.smooth_l1_loss(
+            box_regression[sampled_pos_inds_subset, labels_pos],
+            regression_targets[sampled_pos_inds_subset],
+            beta=1 / 9,
+            reduction="sum",
+        )
+        box_loss = box_loss / labels.numel()
 
     return classification_loss, box_loss
 
