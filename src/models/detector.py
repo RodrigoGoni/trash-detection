@@ -201,3 +201,101 @@ class YOLOv11Detector(nn.Module):
     def val(self, data_yaml: str, **kwargs):
         return self.model.val(data=data_yaml, imgsz=self.img_size, **kwargs)
 
+
+class YOLOv11SegmentationDetector(nn.Module):
+    """YOLOv11 Instance Segmentation detector for trash detection
+    
+    This model extends YOLOv11 for instance segmentation tasks, providing
+    both bounding box detection and pixel-level segmentation masks.
+    
+    Args:
+        num_classes: Number of classes without background
+        model_size: Model variant (n, s, m, l, x)
+        pretrained: Use pretrained weights (COCO-seg pretrained)
+        img_size: Input image size
+    """
+
+    def __init__(
+        self,
+        num_classes: int,
+        model_size: str = 's',
+        pretrained: bool = True,
+        img_size: int = 640
+    ):
+        super().__init__()
+
+        valid_sizes = ['n', 's', 'm', 'l', 'x']
+        if model_size not in valid_sizes:
+            raise ValueError(f"Invalid model_size: {model_size}. Use one of {valid_sizes}")
+
+        # Use segmentation model variant
+        model_name = f'yolo11{model_size}-seg.pt' if pretrained else f'yolo11{model_size}-seg.yaml'
+        
+        self.model = YOLO(model_name)
+        self.num_classes = num_classes
+        self.img_size = img_size
+        self.model_size = model_size
+        self.task = 'segment'
+        
+        print(f"Loaded YOLOv11-{model_size.upper()}-seg {'with pretrained weights' if pretrained else 'from scratch'}")
+
+    def forward(self, x):
+        return self.model(x)
+
+    def train_yolo_segmentation(
+        self,
+        data_yaml: str,
+        epochs: int = 100,
+        batch_size: int = 16,
+        device: str = 'cuda',
+        project: str = './runs/segment',
+        name: str = 'exp',
+        yolo_config: Optional[Dict] = None,
+        **kwargs
+    ):
+        """Train YOLO segmentation model with configuration
+        
+        Args:
+            data_yaml: Path to data YAML file (should have task: segment)
+            epochs: Number of epochs
+            batch_size: Batch size
+            device: Device to use
+            project: Project directory (default: ./runs/segment)
+            name: Experiment name
+            yolo_config: YOLO configuration dict from config file
+            **kwargs: Additional arguments override yolo_config
+        
+        Returns:
+            Training results
+        """
+        from src.training.yolo_trainer import train_yolo_segmentation_model
+        
+        # Disable external integrations (we use MLflow manually)
+        ultralytics_settings.update({
+            'mlflow': False,
+            'comet': False,
+            'tensorboard': False,
+            'wandb': False
+        })
+        
+        return train_yolo_segmentation_model(
+            model=self.model,
+            data_yaml=data_yaml,
+            epochs=epochs,
+            batch_size=batch_size,
+            img_size=self.img_size,
+            device=device,
+            project=project,
+            name=name,
+            yolo_config=yolo_config,
+            **kwargs
+        )
+
+    def predict(self, source, **kwargs):
+        """Run prediction on source (image/video/directory)"""
+        return self.model.predict(source, imgsz=self.img_size, **kwargs)
+    
+    def val(self, data_yaml: str, **kwargs):
+        """Run validation on dataset"""
+        return self.model.val(data=data_yaml, imgsz=self.img_size, **kwargs)
+

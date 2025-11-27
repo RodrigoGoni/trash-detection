@@ -99,6 +99,101 @@ def train_yolo_model(
     return results
 
 
+def train_yolo_segmentation_model(
+    model,
+    data_yaml: str,
+    epochs: int = 100,
+    batch_size: int = 16,
+    img_size: int = 640,
+    device: str = 'cuda',
+    project: str = './runs/segment',
+    name: str = 'exp',
+    yolo_config: Optional[Dict] = None,
+    **kwargs
+):
+    """Train YOLO Instance Segmentation model with configuration parameters.
+    
+    This function is specifically for training YOLOv11-seg models for instance segmentation.
+    It handles both bounding box detection and pixel-level segmentation masks.
+    
+    Args:
+        model: YOLO model instance (segmentation variant)
+        data_yaml: Path to data YAML configuration (should have task: segment)
+        epochs: Number of training epochs
+        batch_size: Batch size
+        img_size: Image size
+        device: Device to train on
+        project: Project directory (default: ./runs/segment)
+        name: Experiment name
+        yolo_config: Dictionary with YOLO training parameters from config file
+        **kwargs: Additional YOLO training arguments (override yolo_config)
+        
+    Returns:
+        Training results including box and mask metrics
+    """
+    
+    # Base training arguments
+    train_args = {
+        'data': data_yaml,
+        'epochs': epochs,
+        'batch': batch_size,
+        'imgsz': img_size,
+        'device': device,
+        'project': project,
+        'name': name,
+        'verbose': True,
+        'exist_ok': True,
+    }
+    
+    # Disable YOLO's built-in integrations (we use MLflow)
+    os.environ['MLFLOW_TRACKING_URI'] = ''
+    try:
+        settings.update({'mlflow': False})
+    except:
+        pass
+    
+    # Apply YOLO-specific configuration if provided
+    if yolo_config:
+        # Direct training parameters (same as detection + segmentation-specific)
+        direct_params = [
+            'dropout', 'val', 'plots', 'save', 'lr0', 'lrf', 'momentum', 
+            'weight_decay', 'warmup_epochs', 'warmup_momentum', 
+            'warmup_bias_lr', 'box', 'cls', 'dfl', 'optimizer', 
+            'seed', 'deterministic', 'single_cls', 'classes', 'rect', 
+            'multi_scale', 'compile', 'cos_lr', 'close_mosaic', 'resume', 
+            'patience',
+            # Segmentation-specific parameters
+            'overlap_mask', 'mask_ratio'
+        ]
+        
+        for param in direct_params:
+            if param in yolo_config:
+                train_args[param] = yolo_config[param]
+        
+        # Augmentation parameters
+        if 'augmentation' in yolo_config:
+            aug_config = yolo_config['augmentation']
+            aug_params = [
+                'hsv_h', 'hsv_s', 'hsv_v', 'degrees', 'translate',
+                'scale', 'shear', 'perspective', 'flipud', 'fliplr',
+                'mosaic', 'mixup', 'copy_paste'
+            ]
+            
+            for param in aug_params:
+                if param in aug_config:
+                    train_args[param] = aug_config[param]
+    
+    # Merge additional kwargs (these override yolo_config)
+    train_args.update(kwargs)
+    
+    # Train model
+    print("\nStarting instance segmentation training...")
+    print(f"Task: segment")
+    results = model.train(**train_args)
+    
+    return results
+
+
 def convert_coco_to_yolo_format(
     coco_json_path: str,
     output_dir: str,
