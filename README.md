@@ -130,13 +130,13 @@ Este es un paso crucial. El script `scripts/prepare_data.py` limpia los datos cr
     # - Crea un split 70/15/15 ESTRATIFICADO (fundamental por el desbalanceo).
     # - Mantiene todas las imágenes (min-annotations 1).
     # - Sobrescribe el directorio 'data/processed'.
-    python scripts/prepare_data.py --overwrite --stratify --min-annotations 1
+    python3 scripts/prepare_data.py --overwrite --stratify --min-annotations 1
 
     # -----------------------------------------------------------------
     # Opción 2: Ejecución SIN corrección EXIF (No recomendado)
     # -----------------------------------------------------------------
     # Útil solo para comparar o si estás seguro de que tu dataloader lo maneja.
-    python scripts/prepare_data.py --overwrite --stratify --no-fix-exif
+    python3 scripts/prepare_data.py --overwrite --stratify --no-fix-exif
 ```
 
 
@@ -157,14 +157,14 @@ mlflow server --host 127.0.0.1 --port 5000
 # Lee la configuración de 'config/train_config.yaml'.
 # Guarda el mejor modelo en 'models/checkpoints/best_model.pth'.
 # Registra todo automáticamente en el servidor de MLflow.
-python scripts/train_faster_rcnn.py --config config/train_config.yaml
+python3 scripts/train_faster_rcnn.py --config config/train_config.yaml
 
 # -----------------------------------------------------------------
 # Paso 4.3: Evaluar el modelo Baseline en el Test Set
 # -----------------------------------------------------------------
 # Carga el mejor modelo guardado y lo ejecuta contra el split 'test'.
 # Guarda las métricas finales (mAP, Precision, Recall) en un JSON.
-python scripts/evaluate_model.py \
+python3 scripts/evaluate_model.py \
     --checkpoint models/checkpoints/best_model.pth \
     --output models/checkpoints/test_metrics.json
 ```
@@ -179,12 +179,12 @@ Para entrenar el modelo YOLO, primero debes convertir los datos (preparados en e
 # -----------------------------------------------------------------
 # Lee los JSON de 'data/processed' y crea los .txt y el 'data.yaml'
 # en 'data/yolo/'.
-python scripts/convert_to_yolo.py
+python3 scripts/convert_to_yolo.py
 
 # -----------------------------------------------------------------
 # Paso 5.2: Entrenar el modelo YOLO
 # -----------------------------------------------------------------
-python scripts/train_yolo.py --config config/train_config_yolo11.yaml
+python3 scripts/train_yolo.py --config config/train_config_yolo11.yaml
 ```
 
 ## Flujo de MLOps

@@ -1,10 +1,26 @@
-# Guía de Entrenamiento de Modelos
+# Guía de entrenamiento de modelos
 
-Esta guía documenta la evolución del entrenamiento, justificando la elección de los modelos y la progresión de los experimentos, con un seguimiento centralizado mediante **MLflow**.
+Esta guía documenta la arquitectura de entrenamiento, la evolución de los experimentos y la configuración técnica detallada de los modelos implementados. El sistema utiliza MLflow para la trazabilidad completa de métricas, parámetros y artefactos.
 
 ---
 
-### 1. Definición del baseline: Faster R-CNN (ResNet-50)
+### 1. Arquitectura del sistema de entrenamiento
+
+El proyecto ha evolucionado desde un baseline clásico hacia arquitecturas modernas de single-stage y segmentación. El flujo de trabajo se divide en ramas según el tipo de anotación requerida.
+
+####  Flujo de datos
+
+1. Ramificación por tarea:
+    - Rama A (Detection): `scripts/convert_to_yolo.py` → Genera .txt con cajas [x, y, w, h].
+    - Rama B (Segmentation): `scripts/convert_to_yolo_segmentation.py` → Genera .txt con polígonos [x1, y1, ..., xn, yn].
+2. Entrenamiento: Scripts específicos (`train_yolo.py` / `train_yolo_segmentation.py`) que consumen los configs YAML.
+
+3. Registro: MLflow captura métricas (Box/Mask mAP), pérdidas y artefactos.
+
+
+---
+
+### 1. Fase 1: definición del baseline (Faster R-CNN)
 
 Todo proceso de machine learning necesita un punto de referencia robusto para medir el progreso.
 
@@ -17,32 +33,84 @@ Todo proceso de machine learning necesita un punto de referencia robusto para me
 
 ---
 
-### 2. Modelo Avanzado: YOLOv11
+## 2. Fase 2: detección de objetos con YOLOv11
 
-Tras analizar los errores del baseline, se exploraron arquitecturas más modernas.
+Esta fase implementa un detector *anchor-free* de última generación para mejorar la eficiencia y el manejo de objetos con relaciones de aspecto variadas.
 
-* **Elección del Modelo:** **YOLOv11** (evaluado en `yolo_test_evaluation.ipynb`).
-* **Justificación (Por qué YOLOv11):**
-    1.  **Errores del Baseline:** El Faster R-CNN (basado en *anchors*) puede tener dificultades con objetos de relaciones de aspecto extremas (ej. "pajitas") o con la velocidad de inferencia.
-    2.  **Enfoque sin Anchors (Anchor-Free):** Las arquitecturas modernas como YOLOv11 (dependiendo de la versión) utilizan enfoques *anchor-free* que aprenden a detectar el centro del objeto directamente, adaptándose mejor a las formas variadas de la basura.
-    3.  **Velocidad y Eficiencia:** Los detectores *single-stage* (YOLO) ofrecen un mejor compromiso velocidad/precisión, crucial para un despliegue en tiempo real.
-* **Análisis:** El notebook `yolo_test_evaluation.ipynb` permite un análisis de errores más profundo, visualizando los peores casos y ajustando dinámicamente los umbrales de confianza e IoU para entender dónde falla el modelo.
+### 2.1. Pipeline de Conversión (`convert_to_yolo.py`)
+YOLO requiere un formato específico diferente a COCO. Este script:
+1.  Normaliza las coordenadas `[x_min, y_min, w, h]` a `[x_center, y_center, w, h]` relativas al tamaño de la imagen (0-1).
+2.  Genera la estructura de carpetas requerida por Ultralytics (`images/` y `labels/`).
+3.  Crea automáticamente el archivo `data.yaml` con las rutas absolutas y nombres de clases.
+
+### 2.2. Script de Entrenamiento (`train_yolo.py`)
+El script envuelve la API de Ultralytics para integrar **MLflow**:
+* Registra hiperparámetros de `train_config_yolo11.yaml`.
+* Loguea métricas por época y artefactos finales (`best.pt`, curvas de entrenamiento).
+* Permite reanudar entrenamientos (`--resume`) y evaluar en el set de test al finalizar.
+
+### 2.3. Análisis de Configuración (`train_config_yolo11.yaml`)
+El archivo YAML define una estrategia de entrenamiento agresiva en aumentos de datos, aprovechando que YOLO es robusto a estas transformaciones.
+
+* **Modelo:** Se utiliza la variante `model_size: l` (Large) para maximizar la capacidad de aprendizaje en las 23 clases seleccionadas.
+* **Optimizador:** `AdamW` con `lr0: 0.001` y scheduler `Cosine` con *warmup* de 15 épocas.
+* **Pérdidas:** Se ponderan los componentes de la *loss* para priorizar la localización: `box: 8.5` vs `cls: 0.5`.
+* **Augmentation Integrada:**
+    * **Mosaic (0.1):** Combina 4 imágenes. Clave para detectar objetos en contextos inusuales y a diferentes escalas.
+    * **Mixup (0.02):** Mezcla lineal de imágenes para regularización.
+    * **Copy-Paste (0.1):** Copia objetos de una imagen a otra, vital para aumentar instancias de clases raras.
 
 ---
 
-### 3. Próximos Pasos: Instance Segmentation
+## 3. Fase 3: segmentación de instancias con YOLOv11-Seg
 
-* **Observación (Feedback):** Un problema persistente en la detección de basura es que los *bounding boxes* rectangulares a menudo incluyen una gran cantidad de "fondo" (ej. pasto, asfalto), confundiendo al modelo.
-* **Solución Coherente:** Avanzar hacia la **segmentación de instancias** (ej. Mask R-CNN o YOLOv11-Seg).
-* **Justificación:** La segmentación fuerza al modelo a aprender la forma *exacta* del objeto (generando una máscara, no solo una caja). Esto reduce la dependencia del fondo, mejora la separación de objetos superpuestos y proporciona una métrica de IoU mucho más precisa, lo cual es coherente con los problemas observados en el análisis de errores.
+**Justificación:** El análisis de errores reveló que las cajas rectangulares incluían demasiado "fondo" (pasto, asfalto), confundiendo al modelo. La segmentación aísla la morfología exacta de la basura.
+
+### 3.1. Pipeline de Conversión (`convert_to_yolo_segmentation.py`)
+Maneja la complejidad de los polígonos:
+1.  **Validación:** Filtra polígonos inválidos o corruptos del JSON original.
+2.  **Formato:** Convierte a `<class_index> <x1> <y1> ... <xn> <yn>`, normalizando cada punto.
+3.  **Integridad:** Verifica que cada imagen tenga su correspondiente archivo de etiquetas.
+
+### 3.2. Script de Entrenamiento (`train_yolo_segmentation.py`)
+Extiende la funcionalidad de detección para tareas de segmentación:
+* Utiliza `YOLOv11SegmentationDetector`.
+* Registra métricas duales en MLflow:
+    * `metrics/mAP50(B)`: Precisión de las cajas (Box).
+    * `metrics/mAP50(M)`: Precisión de las máscaras (Mask).
+* Esto permite cuantificar exactamente cuánto mejora el modelo al entender la forma del objeto vs. solo su ubicación.
+
+### 3.3. Análisis de Configuración (`train_config_yolo11_segmentation.yaml`)
+Esta configuración está optimizada específicamente para **objetos pequeños y delgados** (como colillas o pajitas), que son difíciles de segmentar.
+
+* **Modelo:** Variante `model_size: s` (Small) como *baseline* eficiente para segmentación.
+* **Hiperparámetros de Inferencia:**
+    * `conf_threshold: 0.25`: Umbral de confianza estándar.
+    * `iou_threshold: 0.7`: Umbral alto para NMS, buscando separar objetos muy juntos.
+* **Estrategias para Objetos Pequeños (Notas de Configuración):**
+    * El archivo contempla ajustes futuros como aumentar `img_size` a 1280 o reducir el `mask_ratio` para obtener máscaras de mayor resolución.
+    * Se sugiere aumentar `copy_paste` para duplicar instancias de objetos pequeños.
 
 ---
 
-## 4. Configuración detallada del entrenamiento (YAML)
+## 4. Comparativa de Archivos de Configuración
+
+| Característica | Detección (`train_config_yolo11.yaml`) | Segmentación (`train_config_yolo11_segmentation.yaml`) |
+| :--- | :--- | :--- |
+| **Tarea** | Localización (Cajas) | Localización + Morfología (Máscaras) |
+| **Modelo Base** | `yolo11l.pt` (Large) | `yolo11s-seg.pt` (Small-Seg) |
+| **Box Loss Weight** | 8.5 (Prioridad Alta) | 7.5 (Balanceado con Mask Loss) |
+| **Augmentation** | Mosaic, Mixup, CopyPaste habilitados | Configurable (énfasis en CopyPaste sugerido) |
+| **Métricas** | mAP (Box) | mAP (Box) + mAP (Mask) |
+| **Uso Principal** | Detección rápida general | Análisis de morfología y separación precisa |
+
+---
+
+## 5. Configuración detallada del entrenamiento (YAML)
 
 El *pipeline* de entrenamiento se controla mediante archivos de configuración `.yaml` para garantizar la reproducibilidad y facilitar el seguimiento de experimentos con MLflow. A continuación, se documentan los dos archivos de configuración principales.
 
-### 4.1. Baseline: Faster R-CNN (`train_config.yaml`)
+### 5.1. Baseline: Faster R-CNN (`train_config.yaml`)
 
 Este archivo configura el *pipeline* de entrenamiento para el modelo *baseline* (Faster R-CNN con un *backbone*). Está diseñado para usar un *pipeline* de aumentos de datos externo (vía Albumentations) y una estrategia de pérdida avanzada para combatir el desbalanceo extremo de clases del dataset TACO.
 
