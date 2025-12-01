@@ -24,17 +24,30 @@ El análisis (reflejado en `notebooks/01_exploration/` y `notebooks/02_preproces
 * **Decisión (Split):** para asegurar que las clases minoritarias estuvieran presentes en validación y prueba, se implementó una **división estratificada** (ej. 70/15/15) en `scripts/prepare_data.py`. El notebook `class_balance_analysis.ipynb` valida que esta estratificación mantiene la distribución de clases en todos los conjuntos.
 * **Decisión (entrenamiento):** dado el desbalanceo, se preparó el pipeline de entrenamiento para utilizar técnicas de ponderación de clases, como **Focal Loss** o **Class Balanced Loss**, que son cruciales para que el modelo preste atención a las clases menos frecuentes y pueda tener una mejor generalización en todas las clases.
 
-#### 2.2. Co-ocurrencia de Clases
+#### 2.2. Filtrado de clases con representación insuficiente
+
+* **Observación:** el análisis de distribución reveló que varias clases tenían una **representación extremadamente baja** (< 50 muestras), lo que genera tres problemas fundamentales:
+  1. **Imposibilidad de split estratificado:** clases con pocas muestras no pueden dividirse adecuadamente en train/val/test manteniendo representación estadística en cada conjunto.
+  2. **Riesgo de overfitting:** el modelo memorizaría las pocas instancias en lugar de aprender patrones generalizables de la clase.
+  3. **Métricas poco confiables:** evaluar el desempeño en clases con 5-10 muestras de prueba no proporciona significancia estadística.
+* **Decisión:** se implementó un filtrado paramétrico en `scripts/prepare_data.py` mediante el argumento `--min-class-samples` (default: 50), que:
+  - Elimina clases por debajo del umbral de muestras.
+  - Remueve sus anotaciones asociadas.
+  - Re-mapea los IDs de categorías para mantener una numeración secuencial (0, 1, 2, ...), lo cual es requerido por muchos frameworks de entrenamiento.
+* **Justificación:** priorizar la calidad sobre la cantidad de clases. Es preferible entrenar un detector robusto en 30 clases bien representadas que un modelo mediocre en 60 clases donde la mitad tiene datos insuficientes.
+* **Resultado:** tras aplicar el filtrado con umbral de 50 muestras, el dataset final contiene **23 clases**, reducidas desde las 60 originales de TACO. 
+
+#### 2.3. Co-ocurrencia de Clases
 
 * **Observación:** el heatmap de co-ocurrencias (analizado en `class_balance_analysis.ipynb`) muestra patrones de qué objetos tienden a aparecer juntos (ej. "botellas" y "tapas").
 * **Implicación:** esto sugiere que el contexto es importante. El modelo no solo debe identificar un objeto aislado, sino ser capaz de diferenciar objetos distintos que frecuentemente aparecen agrupados en la misma escena.
 
-#### 2.3. Análisis de casos extremos
+#### 2.4. Análisis de casos extremos
 
 * **Observación:** el notebook `preprocessing_visualization.ipynb` incluye un análisis de casos extremos de brillo, contraste y luminosidad. Se observó que muchas imágenes están sobreexpuestas (cielos brillantes) o subexpuestas (sombras).
 * **Decisión:** el pipeline de *augmentation* debe ser robusto. Se incluyeron transformaciones (`RandomBrightnessContrast`, `HueSaturationValue`) para simular estas condiciones y forzar al modelo a ser invariante a la iluminación.
 
-#### 2.4. Análisis Adicionales 
+#### 2.5. Análisis Adicionales 
 
 Para enriquecer el EDA, los siguientes pasos serían:
 * **Análisis de Relación de Aspecto (Aspect Ratio):** analizar la distribución de las relaciones de aspecto de las *bounding boxes* por clase. Esto ayudaría a optimizar los *anchor boxes* para los modelos que los utilizan (como Faster R-CNN) o a entender si ciertas clases (ej. "pajitas" vs. "bolsas") son dimensionalmente distintas.
