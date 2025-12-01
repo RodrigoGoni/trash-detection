@@ -153,21 +153,21 @@ La mejora de precisión de 310% (detección) a 549% (segmentación) se explica p
 
 ### 7.1. Comparación Visual entre Modelos
 
-Las siguientes imágenes muestran cómo cada modelo procesa la misma escena. Se observa claramente la reducción de falsos positivos conforme mejora el modelo.
+Las siguientes imágenes fueron seleccionadas del dataset de test y son comunes a todas las evaluaciones de modelos (tanto detección como segmentación). Esto permite comparar directamente cómo cada arquitectura procesa exactamente la misma escena. Se observa claramente la reducción de falsos positivos conforme mejora el modelo.
 
 ![Comparación de Inferencia 1](images/batch_inference/comparison_000_batch_10_000000.png)
 
-*Ejemplo 1: Imagen con botellas de plástico en entorno natural. El modelo baseline detecta múltiples falsos positivos en rocas, mientras el modelo de segmentación identifica correctamente solo los residuos.*
+*Ejemplo 1: Imagen del dataset de test con botellas de plástico en entorno natural. El modelo baseline detecta múltiples falsos positivos en rocas, mientras el modelo de segmentación identifica correctamente solo los residuos.*
 
 ![Comparación de Inferencia 2](images/batch_inference/comparison_001_batch_10_000085.png)
 
-*Ejemplo 2: Residuos mezclados con vegetación. El modelo optimizado reduce detecciones en hojas y sombras que el baseline marcaba incorrectamente.*
+*Ejemplo 2: Imagen del dataset de test con residuos mezclados con vegetación. El modelo optimizado reduce detecciones en hojas y sombras que el baseline marcaba incorrectamente.*
 
 ### 7.2. Análisis de Casos Difíciles
 
 ![Comparación de Inferencia 3](images/batch_inference/comparison_008_batch_1_000019.png)
 
-*Caso difícil: Residuos parcialmente ocultos. El modelo de segmentación logra identificar objetos que el detector simple no encuentra.*
+*Caso difícil del dataset de test: Residuos parcialmente ocultos. El modelo de segmentación logra identificar objetos que el detector simple no encuentra.*
 
 Estas visualizaciones confirman que la segmentación no solo mejora las métricas numéricas, sino que produce resultados cualitativamente superiores en escenarios reales.
 
