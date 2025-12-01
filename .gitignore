@@ -248,3 +248,4 @@ logs/
 .DS_Store
 Thumbs.db
 data
+evaluation_results

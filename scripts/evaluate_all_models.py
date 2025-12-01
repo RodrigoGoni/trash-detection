@@ -93,25 +93,42 @@ def evaluate_model(model_path, data_yaml, model_name, task_type):
                     eval_result['metrics']['seg_mAP50'] = float(seg.map50) if hasattr(seg, 'map50') else 0.0
                     eval_result['metrics']['seg_mAP50_95'] = float(seg.map) if hasattr(seg, 'map') else 0.0
                 
-                if hasattr(metrics, 'confusion_matrix') and metrics.confusion_matrix is not None:
-                    cm = metrics.confusion_matrix.matrix
-                    if cm is not None:
-                        cm_array = np.array(cm)
-                        num_classes = cm_array.shape[0] - 1
-                        
-                        bg_confusions = 0
-                        total = cm_array.sum()
-                        
-                        if cm_array.shape[1] > num_classes:
-                            bg_col = cm_array[:-1, -1].sum()
-                            bg_confusions += bg_col
-                        
-                        if cm_array.shape[0] > num_classes:
-                            bg_row = cm_array[-1, :-1].sum()
-                            bg_confusions += bg_row
-                        
-                        if total > 0:
-                            eval_result['background_confusion_rate'] = float(bg_confusions / total)
+                # Calcular confusion con background siempre
+                try:
+                    # Necesita plots=True para tener confusion matrix
+                    metrics_cm = model.val(
+                        data=str(data_yaml),
+                        split='test',
+                        batch=BATCH_SIZE,
+                        imgsz=IMG_SIZE,
+                        conf=conf,
+                        iou=iou,
+                        plots=True,
+                        save_json=False,
+                        verbose=False
+                    )
+                    
+                    if hasattr(metrics_cm, 'confusion_matrix') and metrics_cm.confusion_matrix is not None:
+                        cm = metrics_cm.confusion_matrix.matrix
+                        if cm is not None:
+                            cm_array = np.array(cm)
+                            num_classes = cm_array.shape[0] - 1
+                            
+                            bg_confusions = 0
+                            total = cm_array.sum()
+                            
+                            if cm_array.shape[1] > num_classes:
+                                bg_col = cm_array[:-1, -1].sum()
+                                bg_confusions += bg_col
+                            
+                            if cm_array.shape[0] > num_classes:
+                                bg_row = cm_array[-1, :-1].sum()
+                                bg_confusions += bg_row
+                            
+                            if total > 0:
+                                eval_result['background_confusion_rate'] = float(bg_confusions / total)
+                except:
+                    pass
                 
                 results['evaluations'].append(eval_result)
                 

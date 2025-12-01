@@ -78,7 +78,10 @@ def normalize_polygon(points, img_width, img_height):
     Returns:
         Normalized points as flat list
     """
-    normalized = points.copy()
+    # CORRECCIÓN: Convertir a float explícitamente para evitar truncamiento a cero
+    # Si 'points' es int, la división in-place podría redondear a 0 sin esto.
+    normalized = points.astype(np.float32)
+    
     normalized[:, 0] = normalized[:, 0] / img_width
     normalized[:, 1] = normalized[:, 1] / img_height
     
