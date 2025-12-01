@@ -175,7 +175,7 @@ Estas visualizaciones confirman que la segmentación no solo mejora las métrica
 
 ## 8. Gráficos Comparativos de Rendimiento
 
-### 8.1. Comparación de mAP@50
+### 8.1. Comparación de mAP@50-95
 
 ![Comparación de mAP](images/comparison_plots/comparison_map.png)
 
