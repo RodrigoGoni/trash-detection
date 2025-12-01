@@ -19,6 +19,7 @@ Para detalles de la justificación de las decisiones y la evolución de los expe
 -   **[Guía de procesamiento de datos (docs/data_processing.md)](docs/data_processing.md):** detalla el Análisis Exploratorio (EDA), la corrección EXIF, el split estratificado y las conclusiones sobre el desbalanceo de clases.
 -   **[Guía de entrenamiento de modelos (docs/training.md)](docs/training.md):** explica la justificación del *baseline* (Faster R-CNN), la experimentación y la evolución hacia YOLOv11 y la segmentación de instancias.
 -   **[Evaluación de modelos (docs/analisis_comparativo_experimentos.md)](docs/analisis_comparativo_experimentos.md):** muestra la evolucion de los entrenamientos, augmentacion y seleccion de parametros.
+-   **[Resultados finales (docs/resultados_finales.md)](docs/resultados_finales.md):** Resultados finales y comparacion final entre los mejores modelos entrenados.
 
 ## Estructura del Proyecto
 ```
