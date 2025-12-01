@@ -106,11 +106,96 @@ Esta configuración está optimizada específicamente para **objetos pequeños y
 
 ---
 
-## 5. Configuración detallada del entrenamiento (YAML)
+## 5. Curvas de Entrenamiento y Evolución Temporal
+
+Un aspecto importante de esta fase fue el incremento significativo en el número de épocas de entrenamiento comparado con experimentos iniciales. Esto permitió que los modelos convergieran adecuadamente y aprovecharan mejor las estrategias de augmentación agresiva implementadas.
+
+### 5.1. Modelo Baseline - Detección Medium (27 epochs)
+
+El modelo baseline se entrenó con configuración conservadora y pocas épocas, detenido tempranamente por falta de mejora (patience 10).
+
+![Curvas Baseline](images/training_curves/baseline_detection_results.png)
+
+*Curvas de entrenamiento del modelo baseline YOLOv11-Medium. Se observa convergencia temprana alrededor de la época 20, con mAP máximo de 0.069. El entrenamiento se detuvo por early stopping después de 27 epochs.*
+
+**Observaciones:**
+- Convergencia rápida pero a un valor bajo de mAP
+- Pérdidas estables desde época 15
+- El modelo no aprovechó entrenamiento prolongado debido a configuración inicial conservadora
+
+### 5.2. Modelo Large Optimizado - Detección (180 epochs)
+
+Con la configuración optimizada y patience aumentado a 100, el modelo Large se entrenó por 180 epochs antes de detenerse, más de 6 veces más que el baseline.
+
+![Curvas Large Optimizado](images/training_curves/large_optimized_detection_results.png)
+
+*Curvas de entrenamiento del modelo YOLOv11-Large optimizado. El entrenamiento prolongado (180 epochs) permitió que las augmentaciones agresivas (mosaic 100%, copy-paste 30%) surtieran efecto. mAP final de 0.265.*
+
+**Observaciones:**
+- Mejora continua hasta aproximadamente época 150
+- Las augmentaciones agresivas requirieron más tiempo para que el modelo aprendiera patrones robustos
+- La configuración de loss aumentada (box: 10.0) guió un aprendizaje más preciso
+- El entrenamiento prolongado fue esencial para alcanzar el mAP de 0.265
+
+### 5.3. Modelo Medium Segmentación (241 epochs)
+
+El modelo de segmentación Medium se entrenó por 241 epochs con patience 100, demostrando la necesidad de entrenamiento extenso para tareas de segmentación.
+
+![Curvas Medium Segmentación](images/training_curves/medium_segmentation_results.png)
+
+*Curvas de entrenamiento del modelo YOLOv11-Medium Segmentación. El entrenamiento de 241 epochs permitió aprender tanto las cajas (mAP Box: 0.440) como las máscaras (mAP Mask: 0.435). La tarea dual requiere más tiempo de convergencia.*
+
+**Observaciones:**
+- La segmentación requiere más epochs que la detección pura
+- Se observa mejora sostenida en ambas métricas (Box y Mask) hasta época 200+
+- El modelo aprende progresivamente la forma exacta de los objetos, no solo su ubicación
+- Batch size de 16 permitió actualizaciones frecuentes y estables
+
+### 5.4. Modelo X-Large Segmentación (500 epochs)
+
+El modelo X-Large se configuró para entrenar hasta 500 epochs con patience 200, ejecutando el ciclo completo para maximizar oportunidades de mejora.
+
+![Curvas X-Large Segmentación](images/training_curves/xlarge_segmentation_results.png)
+
+*Curvas de entrenamiento del modelo YOLOv11-X-Large Segmentación. Completó las 500 epochs configuradas, pero el rendimiento se estancó alrededor de época 300. mAP final similar al Medium (0.445) a pesar del entrenamiento extendido.*
+
+**Observaciones:**
+- El modelo más grande requirió todas las 500 epochs disponibles
+- Batch size reducido (4 vs 16 del Medium) generó curvas más ruidosas
+- A pesar del entrenamiento prolongado, no superó al modelo Medium
+- El estancamiento en época 300+ sugiere overfitting o limitación del dataset
+
+### 5.5. Conclusiones del Análisis de Curvas
+
+**Importancia del Entrenamiento Prolongado:**
+
+El incremento en el número de epochs fue una decisión clave:
+- **Baseline:** 27 epochs → mAP 0.069
+- **Large Optimizado:** 180 epochs → mAP 0.265 (mejora de 285%)
+- **Medium Segmentación:** 241 epochs → mAP 0.447 (mejora de 550%)
+
+**Factores que requirieron más epochs:**
+1. **Augmentación agresiva:** Mosaic 100% y copy-paste 30% crean escenarios de entrenamiento más difíciles que requieren más tiempo de aprendizaje
+2. **Segmentación:** Aprender contornos pixel-level es más complejo que solo cajas rectangulares
+3. **Reducción de background:** Los ajustes de loss para penalizar detecciones imprecisas requieren convergencia gradual
+
+**Batch Size y Convergencia:**
+- Modelos con batch size 16 (Medium) mostraron curvas más suaves y convergencia más estable
+- Modelos con batch size 4 (X-Large) tuvieron curvas ruidosas y convergencia más lenta
+- El batch size mayor fue más efectivo que simplemente agregar parámetros al modelo
+
+**Patience y Early Stopping:**
+- Patience conservador (10): Detiene demasiado pronto, impide que augmentaciones surtan efecto
+- Patience moderado (100): Balance óptimo entre tiempo y rendimiento
+- Patience alto (200): Útil solo si hay evidencia de mejora continua
+
+---
+
+## 6. Configuración detallada del entrenamiento (YAML)
 
 El *pipeline* de entrenamiento se controla mediante archivos de configuración `.yaml` para garantizar la reproducibilidad y facilitar el seguimiento de experimentos con MLflow. A continuación, se documentan los dos archivos de configuración principales.
 
-### 5.1. Baseline: Faster R-CNN (`train_config.yaml`)
+### 6.1. Baseline: Faster R-CNN (`train_config.yaml`)
 
 Este archivo configura el *pipeline* de entrenamiento para el modelo *baseline* (Faster R-CNN con un *backbone*). Está diseñado para usar un *pipeline* de aumentos de datos externo (vía Albumentations) y una estrategia de pérdida avanzada para combatir el desbalanceo extremo de clases del dataset TACO.
 
