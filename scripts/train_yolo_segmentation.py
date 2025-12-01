@@ -35,7 +35,7 @@ from ultralytics import YOLO
 def parse_args():
     parser = argparse.ArgumentParser(description='Train YOLOv11 Instance Segmentation model')
     parser.add_argument('--config', type=str, default='config/train_config_yolo11_segmentation.yaml')
-    parser.add_argument('--data-dir', type=str, default=None)
+    parser.add_argument('--data-dir', type=str, default='data/yolo_seg')
     parser.add_argument('--epochs', type=int, default=None)
     parser.add_argument('--batch-size', type=int, default=None)
     parser.add_argument('--device', type=str, default=None)
